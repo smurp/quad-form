@@ -25,7 +25,8 @@ const COMMON_PREFIXES = {
   foaf: 'http://xmlns.com/foaf/0.1/',
   dc: 'http://purl.org/dc/elements/1.1/',
   dcterms: 'http://purl.org/dc/terms/',
-  schema: 'http://schema.org/'
+  schema: 'http://schema.org/',
+  mntl: 'urn:mmm:mntl:'
 };
 
 // Hardcoded properties for predicate picker (until datasource working)
@@ -41,6 +42,17 @@ const COMMON_PROPERTIES = [
   'dcterms:created',
   'schema:name',
   'schema:description'
+];
+
+// Mental space types with their templates
+const MENTAL_SPACE_TYPES = [
+  { value: 'mntl:lock', label: 'mntl:lock/{identity}/path', disabled: true },
+  { value: 'mntl:hold', label: 'mntl:hold/{identity}/path', disabled: true },
+  { value: 'mntl:gate', label: 'mntl:gate/{identity}/path', disabled: false },
+  { value: 'mntl:open', label: 'mntl:open/{identity}/path', disabled: false },
+  { value: 'mntl:publ', label: 'mntl:publ/path', disabled: false },
+  { value: 'http:', label: 'http:', disabled: false },
+  { value: 'https:', label: 'https:', disabled: false }
 ];
 
 class QuadFormWC extends HTMLElement {
@@ -69,12 +81,17 @@ class QuadFormWC extends HTMLElement {
       subject: 'input',
       predicate: 'select',
       object: 'input',
-      graph: 'input'
+      graph: 'select'
     };
     
     // Object metadata
     this.objectDatatype = '';
     this.objectLanguage = '';
+    this.objectUsesTextarea = false;
+    
+    // Graph mental space tracking
+    this.graphMentalSpace = 'mntl:publ';
+    this.graphPath = '/scratch';
     
     // Configuration
     this._mmmServer = null;
@@ -82,65 +99,70 @@ class QuadFormWC extends HTMLElement {
     this._currentIdentity = null;
     this._expandCuries = true;
     this._defaultGraph = 'mntl:publ/scratch';
-    
-    // Prefixes form state
-    this.prefixesFormVisible = false;
-  }
-  
-  // Properties
-  get mmmServer() { return this._mmmServer; }
-  set mmmServer(val) { this._mmmServer = val; }
-  
-  get prefixes() { return this._prefixes; }
-  set prefixes(val) { 
-    this._prefixes = { ...COMMON_PREFIXES, ...val };
-    this.updatePrefixesInForm();
-  }
-  
-  get currentIdentity() { return this._currentIdentity; }
-  set currentIdentity(val) { 
-    this._currentIdentity = val;
-    this.updateAttribution();
-  }
-  
-  get expandCuries() { return this._expandCuries; }
-  set expandCuries(val) { this._expandCuries = val; }
-  
-  get defaultGraph() { return this._defaultGraph; }
-  set defaultGraph(val) { 
-    this._defaultGraph = val;
-    if (!this.fieldValues.graph) {
-      this.fieldValues.graph = val;
-    }
   }
   
   connectedCallback() {
     this.render();
     this.attachEventListeners();
+    this.updateAttribution();
+  }
+  
+  // Getters/setters
+  get mmmServer() { return this._mmmServer; }
+  set mmmServer(value) { this._mmmServer = value; }
+  
+  get prefixes() { return this._prefixes; }
+  set prefixes(value) { this._prefixes = { ...COMMON_PREFIXES, ...value }; }
+  
+  get currentIdentity() { return this._currentIdentity; }
+  set currentIdentity(value) { 
+    this._currentIdentity = value;
+    this.updateAttribution();
+    // Re-render to update identity placeholders
+    if (this.shadowRoot.querySelector('.quad-form')) {
+      this.render();
+      this.attachEventListeners();
+    }
+  }
+  
+  get expandCuries() { return this._expandCuries; }
+  set expandCuries(value) { this._expandCuries = value; }
+  
+  get defaultGraph() { return this._defaultGraph; }
+  set defaultGraph(value) { 
+    this._defaultGraph = value;
+    this.fieldValues.graph = value;
+  }
+  
+  getGraphPrefix() {
+    const identity = this._currentIdentity || '';
+    if (!identity) {
+      if (this.graphMentalSpace === 'mntl:publ') {
+        return 'mntl:publ';
+      }
+      return this.graphMentalSpace + '/{identity}';
+    }
     
-    // Set default graph
-    if (!this.fieldValues.graph) {
-      this.fieldValues.graph = this._defaultGraph;
-      const graphInput = this.shadowRoot.querySelector('#graph-input');
-      if (graphInput) graphInput.value = this._defaultGraph;
+    if (this.graphMentalSpace === 'http:' || this.graphMentalSpace === 'https:') {
+      return this.graphMentalSpace + '//';
+    } else if (this.graphMentalSpace === 'mntl:publ') {
+      return 'mntl:publ';
+    } else {
+      return this.graphMentalSpace + '/' + identity;
     }
   }
   
   render() {
     this.shadowRoot.innerHTML = `
       <style>
-        :host {
-          display: block;
-          font-family: monospace;
-          position: relative;
-        }
+        * { box-sizing: border-box; }
         
         .quad-form {
+          font-family: monospace;
           background: white;
-          border: 1px solid #ccc;
+          border: 1px solid #ddd;
           border-radius: 4px;
           padding: 20px;
-          max-width: 600px;
         }
         
         .form-header {
@@ -152,24 +174,29 @@ class QuadFormWC extends HTMLElement {
           border-bottom: 2px solid #e0e0e0;
         }
         
-        .form-header h3 {
+        h3 {
           margin: 0;
-          font-size: 1.1em;
+          font-size: 16px;
+        }
+        
+        .attribution {
+          display: inline-flex;
+          gap: 15px;
+          font-size: 11px;
+          color: #666;
+          background: #f9f9f9;
+          padding: 4px 10px;
+          border-radius: 3px;
         }
         
         .prefixes-btn {
-          background: #4CAF50;
+          background: #2196F3;
           color: white;
           border: none;
           padding: 6px 12px;
           border-radius: 3px;
           cursor: pointer;
-          font-family: monospace;
           font-size: 12px;
-        }
-        
-        .prefixes-btn:hover {
-          background: #45a049;
         }
         
         .field-group {
@@ -179,93 +206,126 @@ class QuadFormWC extends HTMLElement {
         .field-label {
           display: block;
           font-weight: bold;
-          margin-bottom: 4px;
           font-size: 13px;
+          margin-bottom: 5px;
         }
         
         .field-controls {
           display: flex;
           gap: 8px;
-          margin-bottom: 4px;
+          margin-bottom: 8px;
           align-items: center;
         }
         
         .type-select-dropdown {
-          padding: 4px 8px;
-          border: 1px solid #ccc;
+          flex: 1;
+          padding: 6px;
+          border: 1px solid #ddd;
           border-radius: 3px;
           font-family: monospace;
-          font-size: 11px;
-          background: white;
-          cursor: pointer;
-        }
-        
-        .control-toggle {
-          background: #f0f0f0;
-          border: 1px solid #ccc;
-          padding: 4px 12px;
-          cursor: pointer;
-          font-family: monospace;
-          font-size: 11px;
-          border-radius: 3px;
-          margin-left: auto;
-        }
-        
-        .control-toggle:hover {
-          background: #e0e0e0;
-        }
-        
-        optgroup {
-          font-style: normal;
-          color: #999;
-          font-weight: normal;
-        }
-        
-        .field-input, .field-select {
-          width: 100%;
-          padding: 8px;
-          border: 1px solid #ccc;
-          border-radius: 3px;
-          font-family: monospace;
-          font-size: 13px;
-          box-sizing: border-box;
-        }
-        
-        .field-input:focus, .field-select:focus {
-          outline: none;
-          border-color: #2196F3;
-        }
-        
-        .hidden {
-          display: none !important;
+          font-size: 12px;
         }
         
         .language-input {
+          width: 35px;
           padding: 6px;
-          border: 1px solid #ccc;
+          border: 1px solid #ddd;
           border-radius: 3px;
           font-family: monospace;
           font-size: 12px;
+          text-align: center;
         }
         
-        .attribution {
-          display: flex;
-          gap: 20px;
-          padding: 10px;
-          background: #f9f9f9;
+        .language-input:disabled {
+          background: #f0f0f0;
+          color: #999;
+          cursor: not-allowed;
+        }
+        
+        .control-toggle {
+          background: white;
+          border: 1px solid #ddd;
+          padding: 6px 10px;
+          cursor: pointer;
+          font-family: monospace;
           border-radius: 3px;
           font-size: 12px;
-          margin: 15px 0;
+          white-space: nowrap;
         }
         
-        .attribution strong {
-          color: #666;
+        .control-toggle:hover {
+          background: #f5f5f5;
+          border-color: #999;
+        }
+        
+        .field-input, .field-select, .field-textarea {
+          width: 100%;
+          padding: 8px;
+          border: 1px solid #ddd;
+          border-radius: 3px;
+          font-family: monospace;
+          font-size: 13px;
+        }
+        
+        .field-textarea {
+          min-height: 80px;
+          resize: vertical;
+        }
+        
+        .field-input:focus, .field-select:focus, .field-textarea:focus {
+          outline: none;
+          border-color: #4CAF50;
+          box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.1);
+        }
+        
+        .graph-input-wrapper {
+          display: flex;
+          align-items: stretch;
+          border: 1px solid #ddd;
+          border-radius: 3px;
+          overflow: hidden;
+        }
+        
+        .graph-input-wrapper:focus-within {
+          border-color: #4CAF50;
+          box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.1);
+        }
+        
+        .graph-prefix {
+          background: #e8e8e8;
+          color: #555;
+          padding: 8px;
+          font-family: monospace;
+          font-size: 13px;
+          white-space: nowrap;
+          display: flex;
+          align-items: center;
+          border-right: 1px solid #ccc;
+        }
+        
+        .graph-path-input {
+          flex: 1;
+          border: none;
+          padding: 8px;
+          font-family: monospace;
+          font-size: 13px;
+          min-width: 100px;
+        }
+        
+        .graph-path-input:focus {
+          outline: none;
+        }
+        
+        .hidden {
+          display: none;
         }
         
         .form-actions {
           display: flex;
           gap: 10px;
-          margin-top: 15px;
+          margin-top: 20px;
+          padding-top: 15px;
+          border-top: 2px solid #e0e0e0;
         }
         
         .submit-btn, .clear-btn {
@@ -303,7 +363,7 @@ class QuadFormWC extends HTMLElement {
         }
         
         .prefixes-overlay {
-          position: absolute;
+          position: fixed;
           top: 0;
           left: 0;
           right: 0;
@@ -344,6 +404,10 @@ class QuadFormWC extends HTMLElement {
       <div class="quad-form">
         <div class="form-header">
           <h3>Create Quad</h3>
+          <div class="attribution">
+            <span><strong>at:</strong> <span id="at-value">—</span></span>
+            <span><strong>by:</strong> <span id="by-value">${this._currentIdentity || 'not logged in'}</span></span>
+          </div>
           <button class="prefixes-btn" id="prefixes-btn">Prefixes</button>
         </div>
         
@@ -352,11 +416,6 @@ class QuadFormWC extends HTMLElement {
           ${this.renderField('predicate', 'Predicate')}
           ${this.renderField('object', 'Object')}
           ${this.renderField('graph', 'Graph')}
-          
-          <div class="attribution">
-            <div><strong>at:</strong> <span id="at-value"></span></div>
-            <div><strong>by:</strong> <span id="by-value">${this._currentIdentity || 'anonymous'}</span></div>
-          </div>
           
           <div class="form-actions">
             <button type="button" class="clear-btn" id="clear-btn">Clear</button>
@@ -380,94 +439,142 @@ class QuadFormWC extends HTMLElement {
     const fieldType = this.fieldTypes[fieldName];
     const controlType = this.fieldControls[fieldName];
     const isObject = fieldName === 'object';
+    const isGraph = fieldName === 'graph';
     
     return `
       <div class="field-group">
         <label class="field-label">${label}</label>
         
         <div class="field-controls">
-          <select class="type-select-dropdown" data-field="${fieldName}">
-            ${isObject ? this.renderObjectTypeOptions(fieldType) : this.renderStandardTypeOptions(fieldType)}
-          </select>
+          ${isGraph ? this.renderGraphMentalSpaceSelect() : this.renderTypeSelect(fieldName, fieldType, isObject)}
           
-          <button type="button" class="control-toggle" data-field="${fieldName}">
-            ${controlType === 'input' ? '▬' : '▼'} / ${controlType === 'input' ? '▼' : '▬'}
-          </button>
+          ${isObject && !this.objectUsesTextarea ? `
+            <input type="text" 
+                   class="language-input" 
+                   id="language-input"
+                   placeholder="en"
+                   title="Language tag (e.g., en, fr, es)"
+                   maxlength="3"
+                   pattern="^([a-z]{2}|[a-z]{3})?$"
+                   ${!this.objectUsesTextarea ? 'disabled' : ''}
+                   value="${this.objectLanguage}">
+          ` : ''}
+          
+          ${!isGraph ? `
+            <button type="button" class="control-toggle" data-field="${fieldName}">
+              ${controlType === 'input' ? '▬ / ▼' : '▼ / ▬'}
+            </button>
+          ` : ''}
         </div>
         
-        <input type="text" 
-               class="field-input ${controlType === 'select' ? 'hidden' : ''}" 
-               id="${fieldName}-input"
-               data-field="${fieldName}"
-               placeholder="${this.getPlaceholder(fieldName, fieldType)}"
-               value="${this.fieldValues[fieldName]}">
-        
-        <select class="field-select ${controlType === 'input' ? 'hidden' : ''}" 
-                id="${fieldName}-select"
-                data-field="${fieldName}">
-          <option value="">Select ${label}...</option>
-          ${this.renderSelectOptions(fieldName)}
-        </select>
-        
-        ${isObject ? this.renderLanguageInput() : ''}
+        ${!isGraph ? `
+          <input type="text" 
+                 class="field-input ${controlType === 'select' || (isObject && this.objectUsesTextarea) ? 'hidden' : ''}" 
+                 id="${fieldName}-input"
+                 data-field="${fieldName}"
+                 placeholder="${this.getPlaceholder(fieldName, fieldType)}"
+                 value="${this.fieldValues[fieldName]}">
+          
+          <select class="field-select ${controlType === 'input' ? 'hidden' : ''}" 
+                  id="${fieldName}-select"
+                  data-field="${fieldName}">
+            <option value="">Select ${label}...</option>
+            ${this.renderSelectOptions(fieldName)}
+          </select>
+          
+          ${isObject ? `
+            <textarea class="field-textarea ${!this.objectUsesTextarea ? 'hidden' : ''}"
+                      id="object-textarea"
+                      data-field="object"
+                      placeholder="Enter text content...">${this.fieldValues.object}</textarea>
+          ` : ''}
+        ` : this.renderGraphInput()}
       </div>
     `;
   }
   
-  renderStandardTypeOptions(currentType) {
+  renderGraphInput() {
+    const prefix = this.getGraphPrefix();
+    const fullValue = this.fieldValues.graph || this._defaultGraph;
+    
+    // Extract path from full value
+    let path = this.graphPath;
+    if (fullValue.startsWith(prefix)) {
+      path = fullValue.substring(prefix.length);
+    }
+    
     return `
-      <option value="curie" ${currentType === 'curie' ? 'selected' : ''}>CURIE</option>
-      <option value="url" ${currentType === 'url' ? 'selected' : ''}>URL</option>
+      <div class="graph-input-wrapper">
+        <div class="graph-prefix" id="graph-prefix">${prefix}</div>
+        <input type="text" 
+               class="graph-path-input" 
+               id="graph-path-input"
+               placeholder="/path"
+               value="${path}">
+      </div>
+    `;
+  }
+  
+  renderGraphMentalSpaceSelect() {
+    const identity = this._currentIdentity || '{identity}';
+    return `
+      <select class="type-select-dropdown" id="graph-mental-space-select">
+        ${MENTAL_SPACE_TYPES.map(type => {
+          const label = type.label.replace('{identity}', identity);
+          const selected = this.graphMentalSpace === type.value ? 'selected' : '';
+          const disabled = type.disabled ? 'disabled' : '';
+          return `<option value="${type.value}" ${selected} ${disabled}>${label}</option>`;
+        }).join('')}
+      </select>
+    `;
+  }
+  
+  renderTypeSelect(fieldName, fieldType, isObject) {
+    if (isObject) {
+      return this.renderObjectTypeOptions(fieldType);
+    }
+    return this.renderStandardTypeOptions(fieldName, fieldType);
+  }
+  
+  renderStandardTypeOptions(fieldName, currentType) {
+    return `
+      <select class="type-select-dropdown" data-field="${fieldName}">
+        <option value="curie" ${currentType === 'curie' ? 'selected' : ''}>CURIE</option>
+        <option value="url" ${currentType === 'url' ? 'selected' : ''}>URL</option>
+      </select>
     `;
   }
   
   renderObjectTypeOptions(currentType) {
     return `
-      <option value="curie" ${currentType === 'curie' ? 'selected' : ''}>CURIE</option>
-      <option value="url" ${currentType === 'url' ? 'selected' : ''}>URL</option>
-      <optgroup label="literals">
-        <option value="xsd:anyURI" ${currentType === 'xsd:anyURI' ? 'selected' : ''}>anyURI</option>
-      </optgroup>
-      <optgroup label="date/time">
-        <option value="xsd:date" ${currentType === 'xsd:date' ? 'selected' : ''}>date</option>
-        <option value="xsd:dateTime" ${currentType === 'xsd:dateTime' ? 'selected' : ''}>dateTime</option>
-        <option value="xsd:duration" ${currentType === 'xsd:duration' ? 'selected' : ''}>duration</option>
-        <option value="xsd:gYearMonth" ${currentType === 'xsd:gYearMonth' ? 'selected' : ''}>gYearMonth</option>
-        <option value="xsd:gYear" ${currentType === 'xsd:gYear' ? 'selected' : ''}>gYear</option>
-        <option value="xsd:gMonthDay" ${currentType === 'xsd:gMonthDay' ? 'selected' : ''}>gMonthDay</option>
-        <option value="xsd:gDay" ${currentType === 'xsd:gDay' ? 'selected' : ''}>gDay</option>
-        <option value="xsd:gMonth" ${currentType === 'xsd:gMonth' ? 'selected' : ''}>gMonth</option>
-        <option value="xsd:time" ${currentType === 'xsd:time' ? 'selected' : ''}>time</option>
-      </optgroup>
-      <optgroup label="number">
-        <option value="xsd:boolean" ${currentType === 'xsd:boolean' ? 'selected' : ''}>boolean</option>
-        <option value="xsd:float" ${currentType === 'xsd:float' ? 'selected' : ''}>float</option>
-        <option value="xsd:double" ${currentType === 'xsd:double' ? 'selected' : ''}>double</option>
-        <option value="xsd:decimal" ${currentType === 'xsd:decimal' ? 'selected' : ''}>decimal</option>
-        <option value="xsd:integer" ${currentType === 'xsd:integer' ? 'selected' : ''}>integer</option>
-        <option value="xsd:base64Binary" ${currentType === 'xsd:base64Binary' ? 'selected' : ''}>base64Binary</option>
-        <option value="xsd:hexBinary" ${currentType === 'xsd:hexBinary' ? 'selected' : ''}>hexBinary</option>
-      </optgroup>
-      <option value="xsd:string" ${currentType === 'xsd:string' ? 'selected' : ''}>string</option>
-      <optgroup label="RDF types">
-        <option value="rdf:HTML" ${currentType === 'rdf:HTML' ? 'selected' : ''}>rdf:HTML</option>
-        <option value="rdf:XMLLiteral" ${currentType === 'rdf:XMLLiteral' ? 'selected' : ''}>rdf:XMLLiteral</option>
-        <option value="rdf:JSON" ${currentType === 'rdf:JSON' ? 'selected' : ''}>rdf:JSON</option>
-      </optgroup>
-      <optgroup label="MMM types">
-        <option value="mmmdt:markdown" ${currentType === 'mmmdt:markdown' ? 'selected' : ''}>mmmdt:markdown</option>
-      </optgroup>
-    `;
-  }
-  
-  renderLanguageInput() {
-    const isLiteral = this.fieldTypes.object !== 'curie' && this.fieldTypes.object !== 'url';
-    return `
-      <input type="text" 
-             class="language-input ${isLiteral ? '' : 'hidden'}" 
-             id="language-input"
-             placeholder="@en"
-             style="margin-top: 8px; width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 3px; font-family: monospace; font-size: 12px;">
+      <select class="type-select-dropdown" data-field="object" id="object-type-select">
+        <option value="curie" ${currentType === 'curie' ? 'selected' : ''}>CURIE</option>
+        <option value="url" ${currentType === 'url' ? 'selected' : ''}>URL</option>
+        <optgroup label="XSD types">
+          <option value="xsd:string" ${currentType === 'xsd:string' ? 'selected' : ''}>xsd:string</option>
+          <option value="xsd:integer" ${currentType === 'xsd:integer' ? 'selected' : ''}>xsd:integer</option>
+          <option value="xsd:decimal" ${currentType === 'xsd:decimal' ? 'selected' : ''}>xsd:decimal</option>
+          <option value="xsd:float" ${currentType === 'xsd:float' ? 'selected' : ''}>xsd:float</option>
+          <option value="xsd:double" ${currentType === 'xsd:double' ? 'selected' : ''}>xsd:double</option>
+          <option value="xsd:boolean" ${currentType === 'xsd:boolean' ? 'selected' : ''}>xsd:boolean</option>
+          <option value="xsd:date" ${currentType === 'xsd:date' ? 'selected' : ''}>xsd:date</option>
+          <option value="xsd:dateTime" ${currentType === 'xsd:dateTime' ? 'selected' : ''}>xsd:dateTime</option>
+          <option value="xsd:time" ${currentType === 'xsd:time' ? 'selected' : ''}>xsd:time</option>
+          <option value="xsd:gYear" ${currentType === 'xsd:gYear' ? 'selected' : ''}>xsd:gYear</option>
+          <option value="xsd:duration" ${currentType === 'xsd:duration' ? 'selected' : ''}>xsd:duration</option>
+          <option value="xsd:anyURI" ${currentType === 'xsd:anyURI' ? 'selected' : ''}>xsd:anyURI</option>
+          <option value="xsd:base64Binary" ${currentType === 'xsd:base64Binary' ? 'selected' : ''}>xsd:base64Binary</option>
+          <option value="xsd:hexBinary" ${currentType === 'xsd:hexBinary' ? 'selected' : ''}>xsd:hexBinary</option>
+        </optgroup>
+        <optgroup label="RDF types">
+          <option value="rdf:HTML" ${currentType === 'rdf:HTML' ? 'selected' : ''}>rdf:HTML</option>
+          <option value="rdf:XMLLiteral" ${currentType === 'rdf:XMLLiteral' ? 'selected' : ''}>rdf:XMLLiteral</option>
+          <option value="rdf:JSON" ${currentType === 'rdf:JSON' ? 'selected' : ''}>rdf:JSON</option>
+        </optgroup>
+        <optgroup label="MMM types">
+          <option value="mmmdt:markdown" ${currentType === 'mmmdt:markdown' ? 'selected' : ''}>mmmdt:markdown</option>
+        </optgroup>
+      </select>
     `;
   }
   
@@ -518,10 +625,6 @@ class QuadFormWC extends HTMLElement {
       object: {
         curie: 'ex:Bob',
         url: 'http://example.org/Bob'
-      },
-      graph: {
-        curie: 'mntl:publ/scratch',
-        url: 'http://example.org/graph'
       }
     };
     return placeholders[fieldName]?.[fieldType] || '';
@@ -535,10 +638,22 @@ class QuadFormWC extends HTMLElement {
     this.shadowRoot.getElementById('clear-btn')
       .addEventListener('click', () => this.clear());
     
-    // Type select dropdowns
-    this.shadowRoot.querySelectorAll('.type-select-dropdown').forEach(select => {
+    // Type select dropdowns (except graph mental space)
+    this.shadowRoot.querySelectorAll('.type-select-dropdown[data-field]').forEach(select => {
       select.addEventListener('change', this.handleTypeChange.bind(this));
     });
+    
+    // Graph mental space select
+    const graphMentalSpaceSelect = this.shadowRoot.getElementById('graph-mental-space-select');
+    if (graphMentalSpaceSelect) {
+      graphMentalSpaceSelect.addEventListener('change', this.handleGraphMentalSpaceChange.bind(this));
+    }
+    
+    // Graph path input
+    const graphPathInput = this.shadowRoot.getElementById('graph-path-input');
+    if (graphPathInput) {
+      graphPathInput.addEventListener('input', this.handleGraphPathChange.bind(this));
+    }
     
     // Control toggle buttons
     this.shadowRoot.querySelectorAll('.control-toggle').forEach(btn => {
@@ -546,7 +661,7 @@ class QuadFormWC extends HTMLElement {
     });
     
     // Field inputs
-    this.shadowRoot.querySelectorAll('.field-input, .field-select').forEach(input => {
+    this.shadowRoot.querySelectorAll('.field-input, .field-select, .field-textarea').forEach(input => {
       input.addEventListener('input', this.handleFieldChange.bind(this));
       input.addEventListener('change', this.handleFieldChange.bind(this));
     });
@@ -555,7 +670,15 @@ class QuadFormWC extends HTMLElement {
     const languageInput = this.shadowRoot.getElementById('language-input');
     if (languageInput) {
       languageInput.addEventListener('input', (e) => {
-        this.objectLanguage = e.target.value.replace(/^@/, '');
+        // Only allow 0, 2, or 3 characters
+        let value = e.target.value.replace(/^@/, '').toLowerCase();
+        if (value.length === 1) {
+          // Don't allow single character
+          e.target.value = '';
+          this.objectLanguage = '';
+        } else {
+          this.objectLanguage = value;
+        }
       });
     }
     
@@ -575,6 +698,59 @@ class QuadFormWC extends HTMLElement {
       });
   }
   
+  handleGraphPathChange(e) {
+    const path = e.target.value;
+    this.graphPath = path;
+    
+    // Update full graph value
+    const prefix = this.getGraphPrefix();
+    this.fieldValues.graph = prefix + path;
+    
+    this.validate();
+  }
+  
+  handleGraphMentalSpaceChange(e) {
+    const newSpace = e.target.value;
+    const oldSpace = this.graphMentalSpace;
+    
+    // Preserve path if both are mntl: types
+    if (oldSpace.startsWith('mntl:') && newSpace.startsWith('mntl:')) {
+      // Keep existing path
+    } else {
+      // Reset path for non-mntl transitions
+      this.graphPath = newSpace === 'mntl:publ' ? '/scratch' : '/path';
+    }
+    
+    this.graphMentalSpace = newSpace;
+    
+    // Update graph prefix and input
+    const graphPrefix = this.shadowRoot.getElementById('graph-prefix');
+    const graphPathInput = this.shadowRoot.getElementById('graph-path-input');
+    
+    const prefix = this.getGraphPrefix();
+    
+    if (graphPrefix) {
+      graphPrefix.textContent = prefix;
+    }
+    
+    if (graphPathInput) {
+      if (newSpace === 'http:' || newSpace === 'https:') {
+        graphPathInput.placeholder = '//example.org/graph';
+        if (this.graphPath === '/scratch' || this.graphPath === '/path') {
+          this.graphPath = '//example.org/graph';
+          graphPathInput.value = this.graphPath;
+        }
+      } else {
+        graphPathInput.placeholder = '/path';
+      }
+    }
+    
+    // Update full graph value
+    this.fieldValues.graph = prefix + this.graphPath;
+    
+    this.validate();
+  }
+  
   handleTypeChange(e) {
     const field = e.target.dataset.field;
     const type = e.target.value;
@@ -587,25 +763,66 @@ class QuadFormWC extends HTMLElement {
       input.placeholder = this.getPlaceholder(field, type);
     }
     
-    // Update object datatype and language input visibility if this is the object field
+    // Handle object field special cases
     if (field === 'object') {
+      const objectInput = this.shadowRoot.getElementById('object-input');
+      const objectTextarea = this.shadowRoot.getElementById('object-textarea');
       const languageInput = this.shadowRoot.getElementById('language-input');
-      const isLiteral = type !== 'curie' && type !== 'url';
       
-      if (languageInput) {
-        if (isLiteral) {
-          languageInput.classList.remove('hidden');
-        } else {
-          languageInput.classList.add('hidden');
+      // Determine if we should use textarea
+      const shouldUseTextarea = type === 'xsd:string' || 
+                                type === 'rdf:HTML' || 
+                                type === 'rdf:XMLLiteral' || 
+                                type === 'rdf:JSON' || 
+                                type === 'mmmdt:markdown';
+      
+      this.objectUsesTextarea = shouldUseTextarea;
+      
+      // Show/hide appropriate input
+      if (shouldUseTextarea) {
+        if (objectInput) objectInput.classList.add('hidden');
+        if (objectTextarea) {
+          objectTextarea.classList.remove('hidden');
+          // Transfer value if switching
+          if (objectInput && objectInput.value) {
+            objectTextarea.value = objectInput.value;
+            this.fieldValues.object = objectInput.value;
+          }
+        }
+        // Enable language input for textarea
+        if (languageInput) {
+          languageInput.disabled = false;
+        }
+      } else {
+        if (objectTextarea) objectTextarea.classList.add('hidden');
+        if (objectInput) {
+          objectInput.classList.remove('hidden');
+          // Transfer value if switching
+          if (objectTextarea && objectTextarea.value) {
+            objectInput.value = objectTextarea.value;
+            this.fieldValues.object = objectTextarea.value;
+          }
         }
       }
       
-      // Set datatype if it's a literal type
-      if (isLiteral) {
+      // Handle CURIE/URL vs literal behavior
+      const isCurieOrUrl = type === 'curie' || type === 'url';
+      
+      if (isCurieOrUrl) {
+        // Behave like Subject/Predicate
+        if (languageInput) {
+          languageInput.disabled = true;
+          languageInput.value = '';
+        }
+        this.objectDatatype = '';
+        this.objectLanguage = '';
+      } else {
+        // It's a literal type
+        if (!shouldUseTextarea && languageInput) {
+          languageInput.disabled = true;
+        }
         this.objectDatatype = type;
         this.updateObjectInputType();
-      } else {
-        this.objectDatatype = '';
       }
     }
     
@@ -718,6 +935,15 @@ class QuadFormWC extends HTMLElement {
       return;
     }
     
+    // Check if we need to generate SNIP
+    const objectValue = this.fieldValues.object;
+    if (this.objectUsesTextarea && objectValue && objectValue.length > 50) {
+      console.log('SNIP should be generated for long text:', {
+        length: objectValue.length,
+        preview: objectValue.substring(0, 50) + '...'
+      });
+    }
+    
     // Build quad in FLAT format
     const quad = {
       s: this.expandCuries ? this.expandCurie(this.fieldValues.subject) : this.fieldValues.subject,
@@ -725,64 +951,59 @@ class QuadFormWC extends HTMLElement {
       o: this.expandCuries ? this.expandCurie(this.fieldValues.object) : this.fieldValues.object,
       g: this.expandCuries ? this.expandCurie(this.fieldValues.graph) : this.fieldValues.graph,
       at: new Date().toISOString(),
-      by: this._currentIdentity || 'mailto:anonymous@localhost'
+      by: this._currentIdentity || 'anonymous'
     };
     
-    // Add datatype if specified
-    if (this.objectDatatype) {
+    // Add datatype if present and not xsd:string
+    if (this.objectDatatype && this.objectDatatype !== 'xsd:string') {
       quad.d = this.objectDatatype;
     }
     
-    // Add language if specified
+    // Add language if present
     if (this.objectLanguage) {
       quad.l = this.objectLanguage;
     }
     
-    // Try mmmServer first, fallback to event
-    let success = false;
-    
-    if (this._mmmServer && typeof this._mmmServer.ingestFlat === 'function') {
-      try {
-        await this._mmmServer.ingestFlat(quad);
-        success = true;
-        console.log('Quad ingested via mmmServer:', quad);
-      } catch (error) {
-        console.error('Failed to ingest via mmmServer:', error);
-      }
-    }
-    
-    // Always emit event
+    // Emit event
     this.dispatchEvent(new CustomEvent('quad-submitted', {
       detail: quad,
       bubbles: true,
       composed: true
     }));
     
-    if (success || !this._mmmServer) {
-      // Clear form on success
+    // If mmmServer is available, submit directly
+    if (this._mmmServer) {
+      try {
+        await this._mmmServer.addQuad(quad);
+        this.clear();
+      } catch (err) {
+        console.error('Failed to submit quad:', err);
+        this.dispatchEvent(new CustomEvent('quad-error', {
+          detail: { error: err },
+          bubbles: true,
+          composed: true
+        }));
+      }
+    } else {
+      // Clear form after event emission
       this.clear();
     }
   }
   
   expandCurie(value) {
-    if (!value || value.includes('://')) {
-      return value; // Already a full URI
-    }
+    if (!value || value.includes('://')) return value;
     
     const colonIndex = value.indexOf(':');
-    if (colonIndex === -1) {
-      return value; // Not a CURIE
-    }
+    if (colonIndex === -1) return value;
     
     const prefix = value.substring(0, colonIndex);
     const localPart = value.substring(colonIndex + 1);
     
-    const expansion = this._prefixes[prefix];
-    if (expansion) {
-      return expansion + localPart;
+    if (this._prefixes[prefix]) {
+      return this._prefixes[prefix] + localPart;
     }
     
-    return value; // Unknown prefix, return as-is
+    return value;
   }
   
   updateAttribution() {
@@ -790,56 +1011,63 @@ class QuadFormWC extends HTMLElement {
     const byValue = this.shadowRoot.getElementById('by-value');
     
     if (atValue) {
-      atValue.textContent = new Date().toISOString();
+      const now = new Date().toISOString();
+      atValue.textContent = now;
+      
+      // Update every second
+      setInterval(() => {
+        atValue.textContent = new Date().toISOString();
+      }, 1000);
     }
     
     if (byValue) {
-      byValue.textContent = this._currentIdentity || 'anonymous';
+      byValue.textContent = this._currentIdentity || 'not logged in';
     }
-  }
-  
-  updatePrefixesInForm() {
-    // TODO: Update prefix-form component if embedded
   }
   
   showPrefixes() {
     const overlay = this.shadowRoot.getElementById('prefixes-overlay');
-    const container = this.shadowRoot.getElementById('prefixes-form-container');
-    
-    if (!this.prefixesFormVisible) {
-      // Create prefixes-form dynamically
-      container.innerHTML = '<prefixes-form></prefixes-form>';
-      
-      // TODO: Set prefixes from this._prefixes
-      const prefixesForm = container.querySelector('prefixes-form');
-      if (prefixesForm) {
-        // Listen for prefix changes
-        prefixesForm.addEventListener('prefix-enabled', (e) => {
-          this._prefixes[e.detail.prefix] = e.detail.expansion;
-        });
-      }
+    if (overlay) {
+      overlay.classList.add('visible');
     }
-    
-    overlay.classList.add('visible');
-    this.prefixesFormVisible = true;
   }
   
   hidePrefixes() {
     const overlay = this.shadowRoot.getElementById('prefixes-overlay');
-    overlay.classList.remove('visible');
+    if (overlay) {
+      overlay.classList.remove('visible');
+    }
   }
   
-  // Public API methods
+  // Public API
   setField(name, value) {
     this.fieldValues[name] = value;
     
     const input = this.shadowRoot.getElementById(`${name}-input`);
     const select = this.shadowRoot.getElementById(`${name}-select`);
+    const textarea = this.shadowRoot.getElementById(`${name}-textarea`);
     
     if (this.fieldControls[name] === 'input' && input) {
       input.value = value;
     } else if (this.fieldControls[name] === 'select' && select) {
       select.value = value;
+    }
+    
+    if (name === 'object' && textarea) {
+      textarea.value = value;
+    }
+    
+    if (name === 'graph') {
+      // Update graph path input
+      const prefix = this.getGraphPrefix();
+      if (value.startsWith(prefix)) {
+        const path = value.substring(prefix.length);
+        const graphPathInput = this.shadowRoot.getElementById('graph-path-input');
+        if (graphPathInput) {
+          graphPathInput.value = path;
+        }
+        this.graphPath = path;
+      }
     }
     
     this.validate();
@@ -875,28 +1103,38 @@ class QuadFormWC extends HTMLElement {
     
     this.objectDatatype = '';
     this.objectLanguage = '';
+    this.objectUsesTextarea = false;
     
     // Clear inputs
     this.shadowRoot.querySelectorAll('.field-input').forEach(input => {
-      if (input.id === 'graph-input') {
-        input.value = this._defaultGraph;
-      } else {
-        input.value = '';
-      }
+      input.value = '';
     });
     
     this.shadowRoot.querySelectorAll('.field-select').forEach(select => {
       select.value = '';
     });
     
+    const textarea = this.shadowRoot.getElementById('object-textarea');
+    if (textarea) textarea.value = '';
+    
+    const graphPathInput = this.shadowRoot.getElementById('graph-path-input');
+    if (graphPathInput) {
+      graphPathInput.value = this.graphPath;
+    }
+    
     // Reset type dropdowns
     this.shadowRoot.querySelectorAll('.type-select-dropdown').forEach(select => {
       const field = select.dataset.field;
-      select.value = this.fieldTypes[field];
+      if (field) {
+        select.value = this.fieldTypes[field];
+      }
     });
     
     const languageInput = this.shadowRoot.getElementById('language-input');
-    if (languageInput) languageInput.value = '';
+    if (languageInput) {
+      languageInput.value = '';
+      languageInput.disabled = true;
+    }
     
     this.validate();
   }
