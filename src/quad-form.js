@@ -185,24 +185,40 @@ class QuadFormWC extends HTMLElement {
         
         .field-controls {
           display: flex;
-          gap: 4px;
+          gap: 8px;
           margin-bottom: 4px;
+          align-items: center;
         }
         
-        .type-toggle, .control-toggle {
+        .type-select-dropdown {
+          padding: 4px 8px;
+          border: 1px solid #ccc;
+          border-radius: 3px;
+          font-family: monospace;
+          font-size: 11px;
+          background: white;
+          cursor: pointer;
+        }
+        
+        .control-toggle {
           background: #f0f0f0;
           border: 1px solid #ccc;
-          padding: 4px 8px;
+          padding: 4px 12px;
           cursor: pointer;
           font-family: monospace;
           font-size: 11px;
           border-radius: 3px;
+          margin-left: auto;
         }
         
-        .type-toggle.active, .control-toggle.active {
-          background: #2196F3;
-          color: white;
-          border-color: #2196F3;
+        .control-toggle:hover {
+          background: #e0e0e0;
+        }
+        
+        optgroup {
+          font-style: normal;
+          color: #999;
+          font-weight: normal;
         }
         
         .field-input, .field-select {
@@ -224,26 +240,12 @@ class QuadFormWC extends HTMLElement {
           display: none !important;
         }
         
-        .object-metadata {
-          display: flex;
-          gap: 8px;
-          margin-top: 8px;
-        }
-        
-        .datatype-select, .language-input {
+        .language-input {
           padding: 6px;
           border: 1px solid #ccc;
           border-radius: 3px;
           font-family: monospace;
           font-size: 12px;
-        }
-        
-        .datatype-select {
-          flex: 1;
-        }
-        
-        .language-input {
-          width: 80px;
         }
         
         .attribution {
@@ -384,17 +386,13 @@ class QuadFormWC extends HTMLElement {
         <label class="field-label">${label}</label>
         
         <div class="field-controls">
-          <button type="button" class="type-toggle ${fieldType === 'curie' ? 'active' : ''}" 
-                  data-field="${fieldName}" data-type="curie">CURIE</button>
-          <button type="button" class="type-toggle ${fieldType === 'url' ? 'active' : ''}" 
-                  data-field="${fieldName}" data-type="url">URL</button>
-          ${isObject ? `<button type="button" class="type-toggle ${fieldType === 'literal' ? 'active' : ''}" 
-                  data-field="${fieldName}" data-type="literal">Literal</button>` : ''}
+          <select class="type-select-dropdown" data-field="${fieldName}">
+            ${isObject ? this.renderObjectTypeOptions(fieldType) : this.renderStandardTypeOptions(fieldType)}
+          </select>
           
-          <button type="button" class="control-toggle ${controlType === 'input' ? 'active' : ''}" 
-                  data-field="${fieldName}" data-control="input">▬</button>
-          <button type="button" class="control-toggle ${controlType === 'select' ? 'active' : ''}" 
-                  data-field="${fieldName}" data-control="select">▼</button>
+          <button type="button" class="control-toggle" data-field="${fieldName}">
+            ${controlType === 'input' ? '▬' : '▼'} / ${controlType === 'input' ? '▼' : '▬'}
+          </button>
         </div>
         
         <input type="text" 
@@ -411,46 +409,65 @@ class QuadFormWC extends HTMLElement {
           ${this.renderSelectOptions(fieldName)}
         </select>
         
-        ${isObject ? this.renderObjectMetadata() : ''}
+        ${isObject ? this.renderLanguageInput() : ''}
       </div>
     `;
   }
   
-  renderObjectMetadata() {
+  renderStandardTypeOptions(currentType) {
     return `
-      <div class="object-metadata" id="object-metadata">
-        <select class="datatype-select" id="datatype-select">
-          <option value="">Plain Literal</option>
-          <optgroup label="XSD Types">
-            <option value="xsd:string">xsd:string</option>
-            <option value="xsd:integer">xsd:integer</option>
-            <option value="xsd:decimal">xsd:decimal</option>
-            <option value="xsd:float">xsd:float</option>
-            <option value="xsd:double">xsd:double</option>
-            <option value="xsd:boolean">xsd:boolean</option>
-            <option value="xsd:date">xsd:date</option>
-            <option value="xsd:dateTime">xsd:dateTime</option>
-            <option value="xsd:time">xsd:time</option>
-            <option value="xsd:gYear">xsd:gYear</option>
-            <option value="xsd:duration">xsd:duration</option>
-            <option value="xsd:anyURI">xsd:anyURI</option>
-            <option value="xsd:base64Binary">xsd:base64Binary</option>
-            <option value="xsd:hexBinary">xsd:hexBinary</option>
-          </optgroup>
-          <optgroup label="RDF Types">
-            <option value="rdf:HTML">rdf:HTML</option>
-            <option value="rdf:XMLLiteral">rdf:XMLLiteral</option>
-            <option value="rdf:JSON">rdf:JSON</option>
-          </optgroup>
-          <optgroup label="MMM Types">
-            <option value="mmmdt:markdown">mmmdt:markdown</option>
-          </optgroup>
-        </select>
-        <input type="text" 
-               class="language-input ${this.fieldTypes.object === 'literal' ? '' : 'hidden'}" 
-               id="language-input"
-               placeholder="@en">
-      </div>
+      <option value="curie" ${currentType === 'curie' ? 'selected' : ''}>CURIE</option>
+      <option value="url" ${currentType === 'url' ? 'selected' : ''}>URL</option>
+    `;
+  }
+  
+  renderObjectTypeOptions(currentType) {
+    return `
+      <option value="curie" ${currentType === 'curie' ? 'selected' : ''}>CURIE</option>
+      <option value="url" ${currentType === 'url' ? 'selected' : ''}>URL</option>
+      <optgroup label="literals">
+        <option value="xsd:anyURI" ${currentType === 'xsd:anyURI' ? 'selected' : ''}>anyURI</option>
+      </optgroup>
+      <optgroup label="date/time">
+        <option value="xsd:date" ${currentType === 'xsd:date' ? 'selected' : ''}>date</option>
+        <option value="xsd:dateTime" ${currentType === 'xsd:dateTime' ? 'selected' : ''}>dateTime</option>
+        <option value="xsd:duration" ${currentType === 'xsd:duration' ? 'selected' : ''}>duration</option>
+        <option value="xsd:gYearMonth" ${currentType === 'xsd:gYearMonth' ? 'selected' : ''}>gYearMonth</option>
+        <option value="xsd:gYear" ${currentType === 'xsd:gYear' ? 'selected' : ''}>gYear</option>
+        <option value="xsd:gMonthDay" ${currentType === 'xsd:gMonthDay' ? 'selected' : ''}>gMonthDay</option>
+        <option value="xsd:gDay" ${currentType === 'xsd:gDay' ? 'selected' : ''}>gDay</option>
+        <option value="xsd:gMonth" ${currentType === 'xsd:gMonth' ? 'selected' : ''}>gMonth</option>
+        <option value="xsd:time" ${currentType === 'xsd:time' ? 'selected' : ''}>time</option>
+      </optgroup>
+      <optgroup label="number">
+        <option value="xsd:boolean" ${currentType === 'xsd:boolean' ? 'selected' : ''}>boolean</option>
+        <option value="xsd:float" ${currentType === 'xsd:float' ? 'selected' : ''}>float</option>
+        <option value="xsd:double" ${currentType === 'xsd:double' ? 'selected' : ''}>double</option>
+        <option value="xsd:decimal" ${currentType === 'xsd:decimal' ? 'selected' : ''}>decimal</option>
+        <option value="xsd:integer" ${currentType === 'xsd:integer' ? 'selected' : ''}>integer</option>
+        <option value="xsd:base64Binary" ${currentType === 'xsd:base64Binary' ? 'selected' : ''}>base64Binary</option>
+        <option value="xsd:hexBinary" ${currentType === 'xsd:hexBinary' ? 'selected' : ''}>hexBinary</option>
+      </optgroup>
+      <option value="xsd:string" ${currentType === 'xsd:string' ? 'selected' : ''}>string</option>
+      <optgroup label="RDF types">
+        <option value="rdf:HTML" ${currentType === 'rdf:HTML' ? 'selected' : ''}>rdf:HTML</option>
+        <option value="rdf:XMLLiteral" ${currentType === 'rdf:XMLLiteral' ? 'selected' : ''}>rdf:XMLLiteral</option>
+        <option value="rdf:JSON" ${currentType === 'rdf:JSON' ? 'selected' : ''}>rdf:JSON</option>
+      </optgroup>
+      <optgroup label="MMM types">
+        <option value="mmmdt:markdown" ${currentType === 'mmmdt:markdown' ? 'selected' : ''}>mmmdt:markdown</option>
+      </optgroup>
+    `;
+  }
+  
+  renderLanguageInput() {
+    const isLiteral = this.fieldTypes.object !== 'curie' && this.fieldTypes.object !== 'url';
+    return `
+      <input type="text" 
+             class="language-input ${isLiteral ? '' : 'hidden'}" 
+             id="language-input"
+             placeholder="@en"
+             style="margin-top: 8px; width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 3px; font-family: monospace; font-size: 12px;">
     `;
   }
   
@@ -464,26 +481,47 @@ class QuadFormWC extends HTMLElement {
   }
   
   getPlaceholder(fieldName, fieldType) {
+    // For datatypes, return appropriate placeholder
+    if (fieldType && fieldType.startsWith('xsd:')) {
+      const typeMap = {
+        'xsd:integer': '42',
+        'xsd:decimal': '3.14',
+        'xsd:float': '3.14',
+        'xsd:double': '2.71828',
+        'xsd:boolean': 'true',
+        'xsd:date': '2025-01-15',
+        'xsd:dateTime': '2025-01-15T10:30:00',
+        'xsd:time': '10:30:00',
+        'xsd:gYear': '2025',
+        'xsd:duration': 'P1Y2M3D',
+        'xsd:anyURI': 'http://example.org',
+        'xsd:base64Binary': 'SGVsbG8gV29ybGQ=',
+        'xsd:hexBinary': '48656c6c6f',
+        'xsd:string': 'text value'
+      };
+      return typeMap[fieldType] || 'value';
+    }
+    
+    if (fieldType && (fieldType.startsWith('rdf:') || fieldType.startsWith('mmmdt:'))) {
+      return 'formatted content';
+    }
+    
     const placeholders = {
       subject: {
         curie: 'ex:Alice',
-        url: 'http://example.org/Alice',
-        literal: 'text value'
+        url: 'http://example.org/Alice'
       },
       predicate: {
         curie: 'foaf:knows',
-        url: 'http://xmlns.com/foaf/0.1/knows',
-        literal: 'text value'
+        url: 'http://xmlns.com/foaf/0.1/knows'
       },
       object: {
         curie: 'ex:Bob',
-        url: 'http://example.org/Bob',
-        literal: 'text value'
+        url: 'http://example.org/Bob'
       },
       graph: {
         curie: 'mntl:publ/scratch',
-        url: 'http://example.org/graph',
-        literal: 'text value'
+        url: 'http://example.org/graph'
       }
     };
     return placeholders[fieldName]?.[fieldType] || '';
@@ -497,12 +535,12 @@ class QuadFormWC extends HTMLElement {
     this.shadowRoot.getElementById('clear-btn')
       .addEventListener('click', () => this.clear());
     
-    // Type toggles
-    this.shadowRoot.querySelectorAll('.type-toggle').forEach(btn => {
-      btn.addEventListener('click', this.handleTypeToggle.bind(this));
+    // Type select dropdowns
+    this.shadowRoot.querySelectorAll('.type-select-dropdown').forEach(select => {
+      select.addEventListener('change', this.handleTypeChange.bind(this));
     });
     
-    // Control toggles
+    // Control toggle buttons
     this.shadowRoot.querySelectorAll('.control-toggle').forEach(btn => {
       btn.addEventListener('click', this.handleControlToggle.bind(this));
     });
@@ -512,15 +550,6 @@ class QuadFormWC extends HTMLElement {
       input.addEventListener('input', this.handleFieldChange.bind(this));
       input.addEventListener('change', this.handleFieldChange.bind(this));
     });
-    
-    // Datatype select
-    const datatypeSelect = this.shadowRoot.getElementById('datatype-select');
-    if (datatypeSelect) {
-      datatypeSelect.addEventListener('change', (e) => {
-        this.objectDatatype = e.target.value;
-        this.updateObjectInputType();
-      });
-    }
     
     // Language input
     const languageInput = this.shadowRoot.getElementById('language-input');
@@ -546,16 +575,11 @@ class QuadFormWC extends HTMLElement {
       });
   }
   
-  handleTypeToggle(e) {
+  handleTypeChange(e) {
     const field = e.target.dataset.field;
-    const type = e.target.dataset.type;
+    const type = e.target.value;
     
     this.fieldTypes[field] = type;
-    
-    // Update button states
-    this.shadowRoot.querySelectorAll(`[data-field="${field}"].type-toggle`).forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.type === type);
-    });
     
     // Update placeholder
     const input = this.shadowRoot.getElementById(`${field}-input`);
@@ -563,13 +587,26 @@ class QuadFormWC extends HTMLElement {
       input.placeholder = this.getPlaceholder(field, type);
     }
     
-    // Show/hide language input for object literals
+    // Update object datatype and language input visibility if this is the object field
     if (field === 'object') {
       const languageInput = this.shadowRoot.getElementById('language-input');
+      const isLiteral = type !== 'curie' && type !== 'url';
+      
       if (languageInput) {
-        languageInput.classList.toggle('hidden', type !== 'literal');
+        if (isLiteral) {
+          languageInput.classList.remove('hidden');
+        } else {
+          languageInput.classList.add('hidden');
+        }
       }
-      this.updateObjectInputType();
+      
+      // Set datatype if it's a literal type
+      if (isLiteral) {
+        this.objectDatatype = type;
+        this.updateObjectInputType();
+      } else {
+        this.objectDatatype = '';
+      }
     }
     
     this.validate();
@@ -577,20 +614,19 @@ class QuadFormWC extends HTMLElement {
   
   handleControlToggle(e) {
     const field = e.target.dataset.field;
-    const control = e.target.dataset.control;
+    const currentControl = this.fieldControls[field];
+    const newControl = currentControl === 'input' ? 'select' : 'input';
     
-    this.fieldControls[field] = control;
+    this.fieldControls[field] = newControl;
     
-    // Update button states
-    this.shadowRoot.querySelectorAll(`[data-field="${field}"].control-toggle`).forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.control === control);
-    });
+    // Update button text
+    e.target.textContent = newControl === 'input' ? '▬ / ▼' : '▼ / ▬';
     
     // Show/hide controls
     const input = this.shadowRoot.getElementById(`${field}-input`);
     const select = this.shadowRoot.getElementById(`${field}-select`);
     
-    if (control === 'input') {
+    if (newControl === 'input') {
       input.classList.remove('hidden');
       select.classList.add('hidden');
     } else {
@@ -829,6 +865,14 @@ class QuadFormWC extends HTMLElement {
       graph: this._defaultGraph
     };
     
+    // Reset to default types
+    this.fieldTypes = {
+      subject: 'url',
+      predicate: 'curie',
+      object: 'url',
+      graph: 'curie'
+    };
+    
     this.objectDatatype = '';
     this.objectLanguage = '';
     
@@ -845,8 +889,11 @@ class QuadFormWC extends HTMLElement {
       select.value = '';
     });
     
-    const datatypeSelect = this.shadowRoot.getElementById('datatype-select');
-    if (datatypeSelect) datatypeSelect.value = '';
+    // Reset type dropdowns
+    this.shadowRoot.querySelectorAll('.type-select-dropdown').forEach(select => {
+      const field = select.dataset.field;
+      select.value = this.fieldTypes[field];
+    });
     
     const languageInput = this.shadowRoot.getElementById('language-input');
     if (languageInput) languageInput.value = '';
