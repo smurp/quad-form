@@ -1,0 +1,51 @@
+{
+  "name": "@mmmlib/quad-form",
+  "version": "1.0.0",
+  "description": "A web component for creating RDF quads with CURIE support and XSD datatypes",
+  "main": "dist/quad-form.js",
+  "module": "src/quad-form.js",
+  "types": "index.d.ts",
+  "files": [
+    "dist/",
+    "src/",
+    "index.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "npm run build:minify",
+    "build:minify": "terser src/quad-form.js -o dist/quad-form.min.js --compress --mangle",
+    "dev": "npx http-server . -p 8001 -c-1",
+    "prepublishOnly": "npm run build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smurp/quad-form.git"
+  },
+  "keywords": [
+    "web-components",
+    "webcomponents",
+    "rdf",
+    "quads",
+    "semantic-web",
+    "linked-data",
+    "mmm",
+    "custom-elements",
+    "curie",
+    "xsd",
+    "datatypes"
+  ],
+  "author": "smurp",
+  "license": "AGPL-3.0-or-later",
+  "bugs": {
+    "url": "https://github.com/smurp/quad-form/issues"
+  },
+  "homepage": "https://github.com/smurp/quad-form#readme",
+  "devDependencies": {
+    "terser": "^5.19.0"
+  },
+  "dependencies": {
+    "@mmmlib/prefixes-form": "^1.1.0"
+  }
+}

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quad Form Demo</title>
+    <script type="module" src="../src/quad-form.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        h1 {
+            color: #333;
+        }
+        
+        .demo-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .event-log {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        .event-entry {
+            margin: 5px 0;
+            padding: 5px;
+            background: white;
+            border-left: 3px solid #4CAF50;
+        }
+        
+        .controls {
+            margin-top: 15px;
+        }
+        
+        button {
+            margin: 5px;
+            padding: 8px 16px;
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background: #1976D2;
+        }
+        
+        pre {
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Quad Form Web Component Demo</h1>
+    
+    <div class="demo-section">
+        <h2>Basic Usage</h2>
+        <quad-form id="basic-form"></quad-form>
+    </div>
+    
+    <div class="demo-section">
+        <h2>Event Monitoring</h2>
+        <quad-form id="event-form"></quad-form>
+        <h3>Event Log:</h3>
+        <div id="event-log" class="event-log"></div>
+    </div>
+    
+    <div class="demo-section">
+        <h2>Programmatic Control</h2>
+        <quad-form id="controlled-form"></quad-form>
+        <div class="controls">
+            <button onclick="populateFields()">Populate Fields</button>
+            <button onclick="getValues()">Get Values</button>
+            <button onclick="clearForm()">Clear Form</button>
+            <button onclick="simulateButtonClick()">Simulate [s] Button</button>
+        </div>
+        <h3>Output:</h3>
+        <pre id="output"></pre>
+    </div>
+    
+    <script>
+        // Event monitoring
+        const eventForm = document.getElementById('event-form');
+        const eventLog = document.getElementById('event-log');
+        
+        eventForm.addEventListener('quad-submitted', (e) => {
+            const entry = document.createElement('div');
+            entry.className = 'event-entry';
+            entry.textContent = `quad-submitted: ${JSON.stringify(e.detail, null, 2)}`;
+            eventLog.appendChild(entry);
+            eventLog.scrollTop = eventLog.scrollHeight;
+        });
+        
+        eventForm.addEventListener('field-changed', (e) => {
+            const entry = document.createElement('div');
+            entry.className = 'event-entry';
+            entry.style.borderLeftColor = '#FF9800';
+            entry.textContent = `field-changed: ${e.detail.field} = ${e.detail.value}`;
+            eventLog.appendChild(entry);
+            eventLog.scrollTop = eventLog.scrollHeight;
+        });
+        
+        // Programmatic control
+        const controlledForm = document.getElementById('controlled-form');
+        const output = document.getElementById('output');
+        
+        function populateFields() {
+            controlledForm.setField('subject', 'ex:Alice');
+            controlledForm.setField('predicate', 'foaf:knows');
+            controlledForm.setField('object', 'ex:Bob');
+            controlledForm.setField('graph', 'mntl:open/social');
+            output.textContent = 'Fields populated!';
+        }
+        
+        function getValues() {
+            const values = {
+                subject: controlledForm.getField('subject'),
+                predicate: controlledForm.getField('predicate'),
+                object: controlledForm.getField('object'),
+                graph: controlledForm.getField('graph')
+            };
+            output.textContent = JSON.stringify(values, null, 2);
+        }
+        
+        function clearForm() {
+            controlledForm.clear();
+            output.textContent = 'Form cleared!';
+        }
+        
+        function simulateButtonClick() {
+            controlledForm.populateFromEntity('ex:Charlie', 'subject', 'reuse');
+            output.textContent = 'Simulated [s] button click for ex:Charlie';
+        }
+        
+        // Set custom prefixes for all forms
+        document.querySelectorAll('quad-form').forEach(form => {
+            form.currentIdentity = 'mailto:demo@example.com';
+            form.prefixes = {
+                ex: 'http://example.org/',
+                foaf: 'http://xmlns.com/foaf/0.1/',
+                dc: 'http://purl.org/dc/elements/1.1/'
+            };
+        });
+    </script>
+</body>
+</html>
