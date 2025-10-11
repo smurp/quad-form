@@ -26,10 +26,13 @@ const COMMON_PREFIXES = {
   dc: 'http://purl.org/dc/elements/1.1/',
   dcterms: 'http://purl.org/dc/terms/',
   schema: 'http://schema.org/',
-  mntl: 'urn:mmm:mntl:'
+  mntl: 'urn:mmm:mntl:',
+  iii: 'urn:mmm:iii:',
+  ex: 'http://example.org/',
+  wp: 'https://en.wikipedia.org/wiki/'
 };
 
-// Hardcoded properties for predicate picker (until datasource working)
+// Hardcoded properties for predicate picker
 const COMMON_PROPERTIES = [
   'rdf:type',
   'rdfs:label',
@@ -68,12 +71,20 @@ class QuadFormWC extends HTMLElement {
       graph: ''
     };
     
-    // Field modes: {curie|url|literal}
+    // Field validity
+    this.fieldValidity = {
+      subject: false,
+      predicate: false,
+      object: false,
+      graph: false
+    };
+    
+    // Field modes: {qname|uri|literal}
     this.fieldTypes = {
-      subject: 'url',
-      predicate: 'curie',
-      object: 'url',
-      graph: 'curie'
+      subject: 'uri',
+      predicate: 'qname',
+      object: 'uri',
+      graph: 'qname'
     };
     
     // Field control modes: {input|select}
@@ -93,11 +104,24 @@ class QuadFormWC extends HTMLElement {
     this.graphMentalSpace = 'mntl:publ';
     this.graphPath = '/scratch';
     
+    // Tiny mode state
+    this.tinyMode = false;
+    this.tinyFieldTypes = {
+      subject: 'qname',
+      predicate: 'qname',
+      object: 'qname'
+    };
+    this.tinyPickerIndices = {
+      subject: 0,
+      predicate: 0,
+      object: 0
+    };
+    
     // Configuration
     this._mmmServer = null;
     this._prefixes = { ...COMMON_PREFIXES };
     this._currentIdentity = null;
-    this._expandCuries = true;
+    this._expandQNames = true;
     this._defaultGraph = 'mntl:publ/scratch';
   }
   
@@ -105,6 +129,7 @@ class QuadFormWC extends HTMLElement {
     this.render();
     this.attachEventListeners();
     this.updateAttribution();
+    this.loadPrefixesForm();
   }
   
   // Getters/setters
@@ -112,21 +137,24 @@ class QuadFormWC extends HTMLElement {
   set mmmServer(value) { this._mmmServer = value; }
   
   get prefixes() { return this._prefixes; }
-  set prefixes(value) { this._prefixes = { ...COMMON_PREFIXES, ...value }; }
+  set prefixes(value) { 
+    this._prefixes = { ...COMMON_PREFIXES, ...value };
+  }
   
   get currentIdentity() { return this._currentIdentity; }
   set currentIdentity(value) { 
     this._currentIdentity = value;
     this.updateAttribution();
     // Re-render to update identity placeholders
-    if (this.shadowRoot.querySelector('.quad-form')) {
+    if (this.shadowRoot.querySelector('.quad-form-container')) {
       this.render();
       this.attachEventListeners();
+      this.loadPrefixesForm();
     }
   }
   
-  get expandCuries() { return this._expandCuries; }
-  set expandCuries(value) { this._expandCuries = value; }
+  get expandQNames() { return this._expandQNames; }
+  set expandQNames(value) { this._expandQNames = value; }
   
   get defaultGraph() { return this._defaultGraph; }
   set defaultGraph(value) { 
@@ -152,19 +180,186 @@ class QuadFormWC extends HTMLElement {
     }
   }
   
+  getPickerValues(field) {
+    if (field === 'predicate') {
+      return COMMON_PROPERTIES;
+    }
+    
+    // For subject and object, return classes from prefixes
+    const classes = [];
+    for (const prefix in this._prefixes) {
+      classes.push(`${prefix}:Class`);
+      classes.push(`${prefix}:Resource`);
+    }
+    return classes;
+  }
+  
+  validateField(field, value, type) {
+    if (!value || value.trim() === '') {
+      return false;
+    }
+    
+    if (type === 'qname') {
+      // QName format: prefix:localName
+      const qnameRegex = /^[a-zA-Z_][\w-]*:[a-zA-Z_][\w-]*$/;
+      if (!qnameRegex.test(value)) {
+        return false;
+      }
+      // Check if prefix exists
+      const prefix = value.split(':')[0];
+      return this._prefixes.hasOwnProperty(prefix);
+    } else if (type === 'uri') {
+      // URI must contain ://
+      return value.includes('://');
+    } else if (type === 'string') {
+      // Strings are always valid if not empty
+      return true;
+    } else {
+      // For other types (xsd:*), accept any non-empty value
+      return true;
+    }
+  }
+  
+  updateFieldValidation() {
+    if (this.tinyMode) {
+      // Validate tiny mode fields
+      ['subject', 'predicate', 'object'].forEach(field => {
+        const input = this.shadowRoot.getElementById(`tiny-${field}`);
+        if (input) {
+          const type = this.tinyFieldTypes[field];
+          const value = input.value;
+          const isValid = this.validateField(field, value, type);
+          this.fieldValidity[field] = isValid;
+          
+          if (value) {
+            input.style.backgroundColor = isValid ? '#e8f5e9' : '#ffebee';
+          } else {
+            input.style.backgroundColor = '';
+          }
+        }
+      });
+    } else {
+      // Validate full mode fields
+      ['subject', 'predicate', 'object'].forEach(field => {
+        const input = this.shadowRoot.getElementById(`${field}-input`);
+        if (input && !input.classList.contains('hidden')) {
+          const type = this.fieldTypes[field];
+          const value = input.value;
+          const isValid = this.validateField(field, value, type);
+          this.fieldValidity[field] = isValid;
+          
+          if (value) {
+            input.style.backgroundColor = isValid ? '#e8f5e9' : '#ffebee';
+          } else {
+            input.style.backgroundColor = '';
+          }
+        }
+      });
+      
+      // Validate graph
+      const graphInput = this.shadowRoot.getElementById('graph-path-input');
+      if (graphInput) {
+        const fullGraph = this.fieldValues.graph;
+        const isValid = fullGraph && fullGraph.trim() !== '';
+        this.fieldValidity.graph = isValid;
+        
+        if (fullGraph) {
+          graphInput.style.backgroundColor = isValid ? '#e8f5e9' : '#ffebee';
+        } else {
+          graphInput.style.backgroundColor = '';
+        }
+      }
+    }
+  }
+  
+  toggleTinyMode() {
+    const container = this.shadowRoot.querySelector('.quad-form-container');
+    
+    if (!this.tinyMode) {
+      // Entering tiny mode
+      this.tinyMode = true;
+      
+      // Set all fields to qname input mode for tiny
+      this.tinyFieldTypes = {
+        subject: 'qname',
+        predicate: 'qname',
+        object: 'qname'
+      };
+      
+      // Add transitioning class
+      container.classList.add('transitioning-to-tiny');
+      
+      // After animation, update DOM
+      setTimeout(() => {
+        container.classList.remove('transitioning-to-tiny');
+        container.classList.add('tiny-mode');
+        this.renderContent();
+        this.attachEventListeners();
+        
+        // Focus first field
+        setTimeout(() => {
+          const firstInput = this.shadowRoot.getElementById('tiny-subject');
+          if (firstInput) firstInput.focus();
+        }, 50);
+      }, 400);
+      
+    } else {
+      // Exiting tiny mode
+      this.tinyMode = false;
+      
+      // Add transitioning class
+      container.classList.add('transitioning-to-full');
+      container.classList.remove('tiny-mode');
+      
+      // After animation, update DOM
+      setTimeout(() => {
+        container.classList.remove('transitioning-to-full');
+        this.renderContent();
+        this.attachEventListeners();
+        this.loadPrefixesForm();
+      }, 400);
+    }
+  }
+  
   render() {
     this.shadowRoot.innerHTML = `
       <style>
         * { box-sizing: border-box; }
         
-        .quad-form {
+        .quad-form-container {
           font-family: monospace;
           background: white;
           border: 1px solid #ddd;
           border-radius: 4px;
           padding: 20px;
+          transition: all 0.4s ease-in-out;
         }
         
+        /* Animation states */
+        .quad-form-container.transitioning-to-tiny .full-mode-content {
+          opacity: 0;
+          transform: scale(0.95);
+        }
+        
+        .quad-form-container.transitioning-to-full .tiny-mode-content {
+          opacity: 0;
+          transform: scale(0.95);
+        }
+        
+        .full-mode-content,
+        .tiny-mode-content {
+          transition: opacity 0.4s ease-in-out, transform 0.4s ease-in-out;
+        }
+        
+        .quad-form-container.tiny-mode .full-mode-content {
+          display: none;
+        }
+        
+        .quad-form-container:not(.tiny-mode) .tiny-mode-content {
+          display: none;
+        }
+        
+        /* Full mode styles */
         .form-header {
           display: flex;
           justify-content: space-between;
@@ -199,6 +394,10 @@ class QuadFormWC extends HTMLElement {
           font-size: 12px;
         }
         
+        .prefixes-btn:hover {
+          background: #1976D2;
+        }
+        
         .field-group {
           margin-bottom: 15px;
         }
@@ -218,12 +417,15 @@ class QuadFormWC extends HTMLElement {
         }
         
         .type-select-dropdown {
-          flex: 1;
           padding: 6px;
           border: 1px solid #ddd;
           border-radius: 3px;
           font-family: monospace;
           font-size: 12px;
+        }
+        
+        .spacer {
+          flex: 1;
         }
         
         .language-input {
@@ -265,6 +467,7 @@ class QuadFormWC extends HTMLElement {
           border-radius: 3px;
           font-family: monospace;
           font-size: 13px;
+          min-width: 16ch;
         }
         
         .field-textarea {
@@ -309,7 +512,7 @@ class QuadFormWC extends HTMLElement {
           padding: 8px;
           font-family: monospace;
           font-size: 13px;
-          min-width: 100px;
+          min-width: 16ch;
         }
         
         .graph-path-input:focus {
@@ -320,6 +523,55 @@ class QuadFormWC extends HTMLElement {
           display: none;
         }
         
+        /* Tiny mode styles */
+        .tiny-line {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        
+        .tiny-field-wrapper {
+          display: inline-flex;
+          align-items: center;
+        }
+        
+        .tiny-decorator {
+          font-weight: 900;
+          font-size: 16px;
+          color: #666;
+        }
+        
+        .tiny-input {
+          border: none;
+          border-bottom: 2px solid #ddd;
+          font-family: monospace;
+          font-size: 14px;
+          padding: 4px 8px;
+          min-width: 16ch;
+        }
+        
+        .tiny-input:focus {
+          outline: none;
+          border-bottom-color: #4CAF50;
+        }
+        
+        .tiny-period {
+          font-weight: bold;
+          font-size: 18px;
+          margin-left: 4px;
+        }
+        
+        .tiny-lang {
+          border: none;
+          border-bottom: 1px solid #ddd;
+          font-family: monospace;
+          font-size: 12px;
+          padding: 2px 4px;
+          width: 40px;
+        }
+        
+        /* Form actions */
         .form-actions {
           display: flex;
           gap: 10px;
@@ -328,7 +580,12 @@ class QuadFormWC extends HTMLElement {
           border-top: 2px solid #e0e0e0;
         }
         
-        .submit-btn, .clear-btn {
+        .quad-form-container.tiny-mode .form-actions {
+          border-top: none;
+          padding-top: 15px;
+        }
+        
+        .submit-btn, .submit-btn-tiny, .clear-btn, .tiny-btn, .form-btn {
           padding: 10px 20px;
           border: none;
           border-radius: 3px;
@@ -351,6 +608,33 @@ class QuadFormWC extends HTMLElement {
         .submit-btn:disabled {
           background: #ccc;
           cursor: not-allowed;
+        }
+        
+        .submit-btn-tiny {
+          background: #4CAF50;
+          color: white;
+          width: 50px;
+          height: 40px;
+          font-size: 24px;
+          padding: 0;
+        }
+        
+        .submit-btn-tiny:hover:not(:disabled) {
+          background: #45a049;
+        }
+        
+        .submit-btn-tiny:disabled {
+          background: #ccc;
+          cursor: not-allowed;
+        }
+        
+        .tiny-btn, .form-btn {
+          background: #2196F3;
+          color: white;
+        }
+        
+        .tiny-btn:hover, .form-btn:hover {
+          background: #1976D2;
         }
         
         .clear-btn {
@@ -383,56 +667,164 @@ class QuadFormWC extends HTMLElement {
           background: white;
           padding: 20px;
           border-radius: 8px;
-          max-width: 500px;
+          max-width: 600px;
           max-height: 80vh;
           overflow-y: auto;
           box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+          position: relative;
         }
         
         .close-prefixes {
-          float: right;
+          position: absolute;
+          top: 10px;
+          right: 10px;
           background: #f44336;
           color: white;
           border: none;
-          padding: 4px 12px;
+          padding: 6px 12px;
           border-radius: 3px;
           cursor: pointer;
           font-family: monospace;
+          font-size: 14px;
+          z-index: 1;
+        }
+        
+        .close-prefixes:hover {
+          background: #d32f2f;
+        }
+        
+        .prefix-list {
+          margin-top: 30px;
+        }
+        
+        .prefix-item {
+          padding: 8px;
+          border-bottom: 1px solid #eee;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        
+        .prefix-name {
+          font-weight: bold;
+          color: #2196F3;
+          min-width: 80px;
+        }
+        
+        .prefix-url {
+          color: #666;
+          word-break: break-all;
+          flex: 1;
         }
       </style>
       
-      <div class="quad-form">
-        <div class="form-header">
-          <h3>Create Quad</h3>
-          <div class="attribution">
-            <span><strong>at:</strong> <span id="at-value">—</span></span>
-            <span><strong>by:</strong> <span id="by-value">${this._currentIdentity || 'not logged in'}</span></span>
-          </div>
-          <button class="prefixes-btn" id="prefixes-btn">Prefixes</button>
-        </div>
+      <div class="quad-form-container">
+        <div class="content-wrapper"></div>
         
-        <form id="quad-form">
-          ${this.renderField('subject', 'Subject')}
-          ${this.renderField('predicate', 'Predicate')}
-          ${this.renderField('object', 'Object')}
-          ${this.renderField('graph', 'Graph')}
-          
-          <div class="form-actions">
-            <button type="button" class="clear-btn" id="clear-btn">Clear</button>
-            <button type="submit" class="submit-btn" id="submit-btn">Submit Quad</button>
+        <div class="prefixes-overlay" id="prefixes-overlay">
+          <div class="prefixes-container">
+            <button class="close-prefixes" id="close-prefixes">✕</button>
+            <div id="prefixes-form-container"></div>
           </div>
-        </form>
-      </div>
-      
-      <div class="prefixes-overlay" id="prefixes-overlay">
-        <div class="prefixes-container">
-          <button class="close-prefixes" id="close-prefixes">✕</button>
-          <div id="prefixes-form-container"></div>
         </div>
       </div>
     `;
     
+    this.renderContent();
     this.updateAttribution();
+  }
+  
+  renderContent() {
+    const wrapper = this.shadowRoot.querySelector('.content-wrapper');
+    if (!wrapper) return;
+    
+    if (this.tinyMode) {
+      wrapper.innerHTML = `
+        <div class="tiny-mode-content">
+          <div class="tiny-line">
+            ${this.renderTinyField('subject')}
+            ${this.renderTinyField('predicate')}
+            ${this.renderTinyField('object')}
+            <span class="tiny-period">.</span>
+          </div>
+          
+          <div class="form-actions">
+            <button type="button" class="form-btn" id="form-btn" tabindex="4">Form</button>
+            <button type="button" class="clear-btn" id="clear-btn" tabindex="5">Clear</button>
+            <button type="button" class="submit-btn-tiny" id="submit-btn" tabindex="6">+</button>
+          </div>
+        </div>
+      `;
+    } else {
+      wrapper.innerHTML = `
+        <div class="full-mode-content">
+          <div class="form-header">
+            <h3>Say It</h3>
+            <div class="attribution">
+              <span><strong>at:</strong> <span id="at-value">—</span></span>
+              <span><strong>by:</strong> <span id="by-value">${this._currentIdentity || 'not logged in'}</span></span>
+            </div>
+            <button class="prefixes-btn" id="prefixes-btn">Prefixes</button>
+          </div>
+          
+          <form id="quad-form">
+            ${this.renderField('subject', 'Subject')}
+            ${this.renderField('predicate', 'Predicate')}
+            ${this.renderField('object', 'Object')}
+            ${this.renderField('graph', 'Graph')}
+            
+            <div class="form-actions">
+              <button type="button" class="tiny-btn" id="tiny-btn">Tiny</button>
+              <button type="button" class="clear-btn" id="clear-btn">Clear</button>
+              <button type="submit" class="submit-btn" id="submit-btn">Submit Quad</button>
+            </div>
+          </form>
+        </div>
+      `;
+    }
+  }
+  
+  renderTinyField(field) {
+    const type = this.tinyFieldTypes[field];
+    const value = this.fieldValues[field] || '';
+    
+    let leftDecorator = '';
+    let rightDecorator = '';
+    let placeholder = '';
+    
+    if (type === 'uri') {
+      leftDecorator = '<span class="tiny-decorator">&lt;</span>';
+      rightDecorator = '<span class="tiny-decorator">&gt;</span>';
+      placeholder = 'http://example.org/' + field;
+    } else if (type === 'string') {
+      leftDecorator = '<span class="tiny-decorator">"</span>';
+      rightDecorator = '<span class="tiny-decorator">"</span>';
+      placeholder = 'text value';
+    } else {
+      // qname
+      placeholder = field === 'predicate' ? 'foaf:knows' : 'ex:' + field.charAt(0).toUpperCase() + field.slice(1);
+    }
+    
+    const langField = (field === 'object' && type === 'string') 
+      ? `<span class="tiny-decorator">@</span><input type="text" class="tiny-lang" id="tiny-lang" value="${this.objectLanguage}" maxlength="3" tabindex="4">`
+      : '';
+    
+    const tabIndex = field === 'subject' ? '1' : field === 'predicate' ? '2' : '3';
+    
+    return `
+      <div class="tiny-field-wrapper">
+        ${leftDecorator}
+        <input type="text" 
+               class="tiny-input" 
+               id="tiny-${field}"
+               data-field="${field}"
+               value="${value}"
+               placeholder="${placeholder}"
+               tabindex="${tabIndex}">
+        ${rightDecorator}
+        ${langField}
+      </div>
+    `;
   }
   
   renderField(fieldName, label) {
@@ -447,6 +839,8 @@ class QuadFormWC extends HTMLElement {
         
         <div class="field-controls">
           ${isGraph ? this.renderGraphMentalSpaceSelect() : this.renderTypeSelect(fieldName, fieldType, isObject)}
+          
+          <div class="spacer"></div>
           
           ${isObject && !this.objectUsesTextarea ? `
             <input type="text" 
@@ -539,8 +933,8 @@ class QuadFormWC extends HTMLElement {
   renderStandardTypeOptions(fieldName, currentType) {
     return `
       <select class="type-select-dropdown" data-field="${fieldName}">
-        <option value="curie" ${currentType === 'curie' ? 'selected' : ''}>CURIE</option>
-        <option value="url" ${currentType === 'url' ? 'selected' : ''}>URL</option>
+        <option value="qname" ${currentType === 'qname' ? 'selected' : ''}>QName</option>
+        <option value="uri" ${currentType === 'uri' ? 'selected' : ''}>URI</option>
       </select>
     `;
   }
@@ -548,8 +942,8 @@ class QuadFormWC extends HTMLElement {
   renderObjectTypeOptions(currentType) {
     return `
       <select class="type-select-dropdown" data-field="object" id="object-type-select">
-        <option value="curie" ${currentType === 'curie' ? 'selected' : ''}>CURIE</option>
-        <option value="url" ${currentType === 'url' ? 'selected' : ''}>URL</option>
+        <option value="qname" ${currentType === 'qname' ? 'selected' : ''}>QName</option>
+        <option value="uri" ${currentType === 'uri' ? 'selected' : ''}>URI</option>
         <optgroup label="XSD types">
           <option value="xsd:string" ${currentType === 'xsd:string' ? 'selected' : ''}>xsd:string</option>
           <option value="xsd:integer" ${currentType === 'xsd:integer' ? 'selected' : ''}>xsd:integer</option>
@@ -615,28 +1009,271 @@ class QuadFormWC extends HTMLElement {
     
     const placeholders = {
       subject: {
-        curie: 'ex:Alice',
-        url: 'http://example.org/Alice'
+        qname: 'ex:Alice',
+        uri: 'http://example.org/Alice'
       },
       predicate: {
-        curie: 'foaf:knows',
-        url: 'http://xmlns.com/foaf/0.1/knows'
+        qname: 'foaf:knows',
+        uri: 'http://xmlns.com/foaf/0.1/knows'
       },
       object: {
-        curie: 'ex:Bob',
-        url: 'http://example.org/Bob'
+        qname: 'ex:Bob',
+        uri: 'http://example.org/Bob'
       }
     };
     return placeholders[fieldName]?.[fieldType] || '';
   }
   
+  async loadPrefixesForm() {
+    const container = this.shadowRoot.getElementById('prefixes-form-container');
+    if (!container) return;
+    
+    // Check if prefixes-form custom element is defined
+    if (customElements.get('prefixes-form')) {
+      try {
+        const prefixesForm = document.createElement('prefixes-form');
+        prefixesForm.setAttribute('prefixes', JSON.stringify(this._prefixes));
+        
+        prefixesForm.addEventListener('prefix-added', (e) => {
+          this._prefixes[e.detail.prefix] = e.detail.expansion;
+        });
+        
+        prefixesForm.addEventListener('prefix-removed', (e) => {
+          delete this._prefixes[e.detail.prefix];
+        });
+        
+        container.innerHTML = '';
+        container.appendChild(prefixesForm);
+        return;
+      } catch (err) {
+        console.warn('Error loading prefixes-form:', err);
+      }
+    }
+    
+    // Fallback: show a styled list of prefixes
+    container.innerHTML = `
+      <h3 style="margin: 0 0 15px 0; color: #2196F3;">Current Prefixes</h3>
+      <div class="prefix-list">
+        ${Object.entries(this._prefixes).map(([prefix, url]) => `
+          <div class="prefix-item">
+            <span class="prefix-name">${prefix}:</span>
+            <span class="prefix-url">${url}</span>
+          </div>
+        `).join('')}
+      </div>
+      <p style="margin-top: 20px; font-size: 12px; color: #666;">
+        To edit prefixes, install the <code>prefixes-form</code> component.
+      </p>
+    `;
+  }
+  
   attachEventListeners() {
-    const form = this.shadowRoot.getElementById('quad-form');
-    form.addEventListener('submit', this.handleSubmit.bind(this));
+    if (this.tinyMode) {
+      this.attachTinyModeListeners();
+    } else {
+      this.attachFullModeListeners();
+    }
+  }
+  
+  attachTinyModeListeners() {
+    // Form button
+    const formBtn = this.shadowRoot.getElementById('form-btn');
+    if (formBtn) {
+      formBtn.addEventListener('click', () => this.toggleTinyMode());
+    }
     
     // Clear button
-    this.shadowRoot.getElementById('clear-btn')
-      .addEventListener('click', () => this.clear());
+    const clearBtn = this.shadowRoot.getElementById('clear-btn');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => this.clear());
+    }
+    
+    // Submit button
+    const submitBtn = this.shadowRoot.getElementById('submit-btn');
+    if (submitBtn) {
+      submitBtn.addEventListener('click', (e) => this.handleSubmit(e));
+    }
+    
+    // Field inputs
+    ['subject', 'predicate', 'object'].forEach(field => {
+      const input = this.shadowRoot.getElementById(`tiny-${field}`);
+      if (input) {
+        input.addEventListener('input', (e) => {
+          this.fieldValues[field] = e.target.value;
+          this.updateFieldValidation();
+        });
+        
+        input.addEventListener('keydown', (e) => this.handleTinyKeydown(e, field));
+      }
+    });
+    
+    // Language input
+    const langInput = this.shadowRoot.getElementById('tiny-lang');
+    if (langInput) {
+      langInput.addEventListener('input', (e) => {
+        let value = e.target.value.replace(/^@/, '').toLowerCase();
+        if (value.length === 1) {
+          e.target.value = '';
+          this.objectLanguage = '';
+        } else {
+          this.objectLanguage = value;
+        }
+      });
+      
+      langInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab' && !e.shiftKey) {
+          e.preventDefault();
+          this.shadowRoot.getElementById('form-btn').focus();
+        }
+      });
+    }
+  }
+  
+  handleTinyKeydown(e, field) {
+    // Tab key - control tab order
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      
+      if (e.shiftKey) {
+        // Shift+Tab - go backwards
+        if (field === 'subject') {
+          this.shadowRoot.getElementById('submit-btn').focus();
+        } else if (field === 'predicate') {
+          this.shadowRoot.getElementById('tiny-subject').focus();
+        } else if (field === 'object') {
+          const langInput = this.shadowRoot.getElementById('tiny-lang');
+          if (langInput && !langInput.classList.contains('hidden')) {
+            // Skip to predicate if lang is showing
+            this.shadowRoot.getElementById('tiny-predicate').focus();
+          } else {
+            this.shadowRoot.getElementById('tiny-predicate').focus();
+          }
+        }
+      } else {
+        // Tab - go forwards
+        if (field === 'subject') {
+          this.shadowRoot.getElementById('tiny-predicate').focus();
+        } else if (field === 'predicate') {
+          this.shadowRoot.getElementById('tiny-object').focus();
+        } else if (field === 'object') {
+          const langInput = this.shadowRoot.getElementById('tiny-lang');
+          if (langInput && !langInput.classList.contains('hidden') && this.tinyFieldTypes.object === 'string') {
+            langInput.focus();
+          } else {
+            this.shadowRoot.getElementById('form-btn').focus();
+          }
+        }
+      }
+      return;
+    }
+    
+    // ESC - toggle field type
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      this.cycleTinyFieldType(field);
+      return;
+    }
+    
+    // Up arrow - previous picker value
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      this.cycleTinyPicker(field, -1);
+      return;
+    }
+    
+    // Down arrow - next picker value
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      this.cycleTinyPicker(field, 1);
+      return;
+    }
+    
+    // Enter - submit
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      this.handleSubmit(e);
+      return;
+    }
+  }
+  
+  cycleTinyFieldType(field) {
+    const current = this.tinyFieldTypes[field];
+    
+    if (field === 'object') {
+      // Object cycles: qname -> uri -> string -> qname
+      if (current === 'qname') {
+        this.tinyFieldTypes[field] = 'uri';
+      } else if (current === 'uri') {
+        this.tinyFieldTypes[field] = 'string';
+      } else {
+        this.tinyFieldTypes[field] = 'qname';
+      }
+    } else {
+      // Subject/Predicate toggle: qname <-> uri
+      this.tinyFieldTypes[field] = current === 'qname' ? 'uri' : 'qname';
+    }
+    
+    // Convert value if needed
+    const currentValue = this.fieldValues[field];
+    if (currentValue) {
+      if (this.tinyFieldTypes[field] === 'uri' && current === 'qname') {
+        this.fieldValues[field] = this.expandQName(currentValue);
+      } else if (this.tinyFieldTypes[field] === 'qname' && current === 'uri') {
+        this.fieldValues[field] = this.contractUri(currentValue);
+      }
+    }
+    
+    this.renderContent();
+    this.attachEventListeners();
+    
+    // Re-focus the field
+    setTimeout(() => {
+      const input = this.shadowRoot.getElementById(`tiny-${field}`);
+      if (input) {
+        input.focus();
+        this.updateFieldValidation();
+      }
+    }, 0);
+  }
+  
+  cycleTinyPicker(field, direction) {
+    const values = this.getPickerValues(field);
+    if (values.length === 0) return;
+    
+    const currentIndex = this.tinyPickerIndices[field];
+    let newIndex = currentIndex + direction;
+    
+    // Wrap around
+    if (newIndex < 0) newIndex = values.length - 1;
+    if (newIndex >= values.length) newIndex = 0;
+    
+    this.tinyPickerIndices[field] = newIndex;
+    this.fieldValues[field] = values[newIndex];
+    
+    const input = this.shadowRoot.getElementById(`tiny-${field}`);
+    if (input) {
+      input.value = values[newIndex];
+      this.updateFieldValidation();
+    }
+  }
+  
+  attachFullModeListeners() {
+    const form = this.shadowRoot.getElementById('quad-form');
+    if (form) {
+      form.addEventListener('submit', this.handleSubmit.bind(this));
+    }
+    
+    // Tiny button
+    const tinyBtn = this.shadowRoot.getElementById('tiny-btn');
+    if (tinyBtn) {
+      tinyBtn.addEventListener('click', () => this.toggleTinyMode());
+    }
+    
+    // Clear button
+    const clearBtn = this.shadowRoot.getElementById('clear-btn');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => this.clear());
+    }
     
     // Type select dropdowns (except graph mental space)
     this.shadowRoot.querySelectorAll('.type-select-dropdown[data-field]').forEach(select => {
@@ -652,7 +1289,10 @@ class QuadFormWC extends HTMLElement {
     // Graph path input
     const graphPathInput = this.shadowRoot.getElementById('graph-path-input');
     if (graphPathInput) {
-      graphPathInput.addEventListener('input', this.handleGraphPathChange.bind(this));
+      graphPathInput.addEventListener('input', (e) => {
+        this.handleGraphPathChange(e);
+        this.updateFieldValidation();
+      });
     }
     
     // Control toggle buttons
@@ -662,8 +1302,14 @@ class QuadFormWC extends HTMLElement {
     
     // Field inputs
     this.shadowRoot.querySelectorAll('.field-input, .field-select, .field-textarea').forEach(input => {
-      input.addEventListener('input', this.handleFieldChange.bind(this));
-      input.addEventListener('change', this.handleFieldChange.bind(this));
+      input.addEventListener('input', (e) => {
+        this.handleFieldChange(e);
+        this.updateFieldValidation();
+      });
+      input.addEventListener('change', (e) => {
+        this.handleFieldChange(e);
+        this.updateFieldValidation();
+      });
     });
     
     // Language input
@@ -683,19 +1329,25 @@ class QuadFormWC extends HTMLElement {
     }
     
     // Prefixes button
-    this.shadowRoot.getElementById('prefixes-btn')
-      .addEventListener('click', () => this.showPrefixes());
+    const prefixesBtn = this.shadowRoot.getElementById('prefixes-btn');
+    if (prefixesBtn) {
+      prefixesBtn.addEventListener('click', () => this.showPrefixes());
+    }
     
-    this.shadowRoot.getElementById('close-prefixes')
-      .addEventListener('click', () => this.hidePrefixes());
+    const closePrefixes = this.shadowRoot.getElementById('close-prefixes');
+    if (closePrefixes) {
+      closePrefixes.addEventListener('click', () => this.hidePrefixes());
+    }
     
     // Close overlay on backdrop click
-    this.shadowRoot.getElementById('prefixes-overlay')
-      .addEventListener('click', (e) => {
+    const overlay = this.shadowRoot.getElementById('prefixes-overlay');
+    if (overlay) {
+      overlay.addEventListener('click', (e) => {
         if (e.target.id === 'prefixes-overlay') {
           this.hidePrefixes();
         }
       });
+    }
   }
   
   handleGraphPathChange(e) {
@@ -753,14 +1405,32 @@ class QuadFormWC extends HTMLElement {
   
   handleTypeChange(e) {
     const field = e.target.dataset.field;
-    const type = e.target.value;
+    const newType = e.target.value;
+    const oldType = this.fieldTypes[field];
     
-    this.fieldTypes[field] = type;
+    this.fieldTypes[field] = newType;
     
     // Update placeholder
     const input = this.shadowRoot.getElementById(`${field}-input`);
     if (input) {
-      input.placeholder = this.getPlaceholder(field, type);
+      input.placeholder = this.getPlaceholder(field, newType);
+    }
+    
+    // Convert value between QName and URI if switching between those modes
+    if (!field.includes('object') && input) {
+      const currentValue = input.value || this.fieldValues[field];
+      
+      if (oldType === 'qname' && newType === 'uri') {
+        // Expand QName to URI
+        const expanded = this.expandQName(currentValue);
+        input.value = expanded;
+        this.fieldValues[field] = expanded;
+      } else if (oldType === 'uri' && newType === 'qname') {
+        // Contract URI to QName
+        const contracted = this.contractUri(currentValue);
+        input.value = contracted;
+        this.fieldValues[field] = contracted;
+      }
     }
     
     // Handle object field special cases
@@ -769,12 +1439,27 @@ class QuadFormWC extends HTMLElement {
       const objectTextarea = this.shadowRoot.getElementById('object-textarea');
       const languageInput = this.shadowRoot.getElementById('language-input');
       
+      // Convert between QName and URI for object field too
+      const currentValue = objectInput?.value || objectTextarea?.value || this.fieldValues.object;
+      
+      if (oldType === 'qname' && newType === 'uri') {
+        const expanded = this.expandQName(currentValue);
+        if (objectInput) objectInput.value = expanded;
+        if (objectTextarea) objectTextarea.value = expanded;
+        this.fieldValues.object = expanded;
+      } else if (oldType === 'uri' && newType === 'qname') {
+        const contracted = this.contractUri(currentValue);
+        if (objectInput) objectInput.value = contracted;
+        if (objectTextarea) objectTextarea.value = contracted;
+        this.fieldValues.object = contracted;
+      }
+      
       // Determine if we should use textarea
-      const shouldUseTextarea = type === 'xsd:string' || 
-                                type === 'rdf:HTML' || 
-                                type === 'rdf:XMLLiteral' || 
-                                type === 'rdf:JSON' || 
-                                type === 'mmmdt:markdown';
+      const shouldUseTextarea = newType === 'xsd:string' || 
+                                newType === 'rdf:HTML' || 
+                                newType === 'rdf:XMLLiteral' || 
+                                newType === 'rdf:JSON' || 
+                                newType === 'mmmdt:markdown';
       
       this.objectUsesTextarea = shouldUseTextarea;
       
@@ -805,10 +1490,10 @@ class QuadFormWC extends HTMLElement {
         }
       }
       
-      // Handle CURIE/URL vs literal behavior
-      const isCurieOrUrl = type === 'curie' || type === 'url';
+      // Handle QName/URI vs literal behavior
+      const isQNameOrUri = newType === 'qname' || newType === 'uri';
       
-      if (isCurieOrUrl) {
+      if (isQNameOrUri) {
         // Behave like Subject/Predicate
         if (languageInput) {
           languageInput.disabled = true;
@@ -821,11 +1506,12 @@ class QuadFormWC extends HTMLElement {
         if (!shouldUseTextarea && languageInput) {
           languageInput.disabled = true;
         }
-        this.objectDatatype = type;
+        this.objectDatatype = newType;
         this.updateObjectInputType();
       }
     }
     
+    this.updateFieldValidation();
     this.validate();
   }
   
@@ -946,10 +1632,10 @@ class QuadFormWC extends HTMLElement {
     
     // Build quad in FLAT format
     const quad = {
-      s: this.expandCuries ? this.expandCurie(this.fieldValues.subject) : this.fieldValues.subject,
-      p: this.expandCuries ? this.expandCurie(this.fieldValues.predicate) : this.fieldValues.predicate,
-      o: this.expandCuries ? this.expandCurie(this.fieldValues.object) : this.fieldValues.object,
-      g: this.expandCuries ? this.expandCurie(this.fieldValues.graph) : this.fieldValues.graph,
+      s: this._expandQNames ? this.expandQName(this.fieldValues.subject) : this.fieldValues.subject,
+      p: this._expandQNames ? this.expandQName(this.fieldValues.predicate) : this.fieldValues.predicate,
+      o: this._expandQNames ? this.expandQName(this.fieldValues.object) : this.fieldValues.object,
+      g: this._expandQNames ? this.expandQName(this.fieldValues.graph) : this.fieldValues.graph,
       at: new Date().toISOString(),
       by: this._currentIdentity || 'anonymous'
     };
@@ -990,7 +1676,7 @@ class QuadFormWC extends HTMLElement {
     }
   }
   
-  expandCurie(value) {
+  expandQName(value) {
     if (!value || value.includes('://')) return value;
     
     const colonIndex = value.indexOf(':');
@@ -1004,6 +1690,19 @@ class QuadFormWC extends HTMLElement {
     }
     
     return value;
+  }
+  
+  contractUri(uri) {
+    if (!uri || !uri.includes('://')) return uri;
+    
+    // Try to find a matching prefix
+    for (const [prefix, expansion] of Object.entries(this._prefixes)) {
+      if (uri.startsWith(expansion)) {
+        return prefix + ':' + uri.substring(expansion.length);
+      }
+    }
+    
+    return uri;
   }
   
   updateAttribution() {
@@ -1095,45 +1794,63 @@ class QuadFormWC extends HTMLElement {
     
     // Reset to default types
     this.fieldTypes = {
-      subject: 'url',
-      predicate: 'curie',
-      object: 'url',
-      graph: 'curie'
+      subject: 'uri',
+      predicate: 'qname',
+      object: 'uri',
+      graph: 'qname'
     };
     
     this.objectDatatype = '';
     this.objectLanguage = '';
     this.objectUsesTextarea = false;
     
-    // Clear inputs
-    this.shadowRoot.querySelectorAll('.field-input').forEach(input => {
-      input.value = '';
-    });
-    
-    this.shadowRoot.querySelectorAll('.field-select').forEach(select => {
-      select.value = '';
-    });
-    
-    const textarea = this.shadowRoot.getElementById('object-textarea');
-    if (textarea) textarea.value = '';
-    
-    const graphPathInput = this.shadowRoot.getElementById('graph-path-input');
-    if (graphPathInput) {
-      graphPathInput.value = this.graphPath;
-    }
-    
-    // Reset type dropdowns
-    this.shadowRoot.querySelectorAll('.type-select-dropdown').forEach(select => {
-      const field = select.dataset.field;
-      if (field) {
-        select.value = this.fieldTypes[field];
+    if (this.tinyMode) {
+      // Just clear tiny inputs
+      ['subject', 'predicate', 'object'].forEach(field => {
+        const input = this.shadowRoot.getElementById(`tiny-${field}`);
+        if (input) {
+          input.value = '';
+          input.style.backgroundColor = '';
+        }
+      });
+      const langInput = this.shadowRoot.getElementById('tiny-lang');
+      if (langInput) langInput.value = '';
+    } else {
+      // Clear full form inputs
+      this.shadowRoot.querySelectorAll('.field-input').forEach(input => {
+        input.value = '';
+        input.style.backgroundColor = '';
+      });
+      
+      this.shadowRoot.querySelectorAll('.field-select').forEach(select => {
+        select.value = '';
+      });
+      
+      const textarea = this.shadowRoot.getElementById('object-textarea');
+      if (textarea) {
+        textarea.value = '';
+        textarea.style.backgroundColor = '';
       }
-    });
-    
-    const languageInput = this.shadowRoot.getElementById('language-input');
-    if (languageInput) {
-      languageInput.value = '';
-      languageInput.disabled = true;
+      
+      const graphPathInput = this.shadowRoot.getElementById('graph-path-input');
+      if (graphPathInput) {
+        graphPathInput.value = this.graphPath;
+        graphPathInput.style.backgroundColor = '';
+      }
+      
+      // Reset type dropdowns
+      this.shadowRoot.querySelectorAll('.type-select-dropdown').forEach(select => {
+        const field = select.dataset.field;
+        if (field) {
+          select.value = this.fieldTypes[field];
+        }
+      });
+      
+      const languageInput = this.shadowRoot.getElementById('language-input');
+      if (languageInput) {
+        languageInput.value = '';
+        languageInput.disabled = true;
+      }
     }
     
     this.validate();
