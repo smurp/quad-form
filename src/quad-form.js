@@ -350,6 +350,7 @@ class QuadFormWC extends HTMLElement {
         .tiny-mode-content {
           transition: opacity 0.4s ease-in-out, transform 0.4s ease-in-out;
         }
+
         
         .quad-form-container.tiny-mode .full-mode-content {
           display: none;
@@ -403,10 +404,12 @@ class QuadFormWC extends HTMLElement {
         }
         
         .field-label {
-          display: block;
+          display: inline-block;
           font-weight: bold;
           font-size: 13px;
-          margin-bottom: 5px;
+          margin-right: 8px;
+          margin-bottom: 0;
+          white-space: nowrap;
         }
         
         .field-controls {
@@ -835,9 +838,9 @@ class QuadFormWC extends HTMLElement {
     
     return `
       <div class="field-group">
-        <label class="field-label">${label}</label>
-        
         <div class="field-controls">
+          <label class="field-label">${label}</label>
+          
           ${isGraph ? this.renderGraphMentalSpaceSelect() : this.renderTypeSelect(fieldName, fieldType, isObject)}
           
           <div class="spacer"></div>
