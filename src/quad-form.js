@@ -49,13 +49,15 @@ const COMMON_PROPERTIES = [
 
 // Mental space types with their templates
 const MENTAL_SPACE_TYPES = [
-  { value: 'mntl:lock', label: 'mntl:lock/{identity}', disabled: true },
+  { value: 'mntl:lock', label: 'mntl:lock/{identity}', disabled: true},
   { value: 'mntl:hold', label: 'mntl:hold/{identity}', disabled: true },
   { value: 'mntl:gate', label: 'mntl:gate/{identity}', disabled: false },
   { value: 'mntl:open', label: 'mntl:open/{identity}', disabled: false },
-  { value: 'mntl:publ', label: 'mntl:publ', disabled: false },
-  { value: 'http:', label: 'http:', disabled: false },
-  { value: 'https:', label: 'https:', disabled: false }
+  { value: 'mntl:publ', label: 'mntl:publ', disabled: false }
+  // Disaabled (but previously supported)
+  // It bears consideration whether there is any meaning in "writing to http"
+  //{ value: 'http:', label: 'http:', disabled: false },
+  //{ value: 'https:', label: 'https:', disabled: false }
 ];
 
 class QuadFormWC extends HTMLElement {
