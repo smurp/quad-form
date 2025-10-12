@@ -426,7 +426,11 @@ class QuadFormWC extends HTMLElement {
           font-family: monospace;
           font-size: 12px;
         }
-        
+
+        #graph-mental-space-select {
+          text-align-last: right;
+        }
+
         .spacer {
           flex: 1;
         }
