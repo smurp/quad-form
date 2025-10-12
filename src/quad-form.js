@@ -635,7 +635,11 @@ class QuadFormWC extends HTMLElement {
           cursor: not-allowed;
         }
         
-        .tiny-btn, .form-btn {
+        .tiny-btn {
+          display: none;
+        }
+        
+        .form-btn {
           background: #2196F3;
           color: white;
         }
