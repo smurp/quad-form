@@ -862,7 +862,7 @@ class QuadFormWC extends HTMLElement {
           
           ${!isGraph ? `
             <button type="button" class="control-toggle" data-field="${fieldName}">
-              ${controlType === 'input' ? '▬ / ▼' : '▼ / ▬'}
+              ${controlType === 'input' ? '<strong>input</strong>/picker' : 'input/<strong>picker</strong>'}
             </button>
           ` : ''}
         </div>
@@ -1520,27 +1520,33 @@ class QuadFormWC extends HTMLElement {
     this.updateFieldValidation();
     this.validate();
   }
-  
+
   handleControlToggle(e) {
-    const field = e.target.dataset.field;
+    // Get the button element (not a child element that might have been clicked)
+    const button = e.target.closest('.control-toggle');
+    if (!button) return;
+    
+    const field = button.dataset.field;
     const currentControl = this.fieldControls[field];
     const newControl = currentControl === 'input' ? 'select' : 'input';
     
     this.fieldControls[field] = newControl;
     
     // Update button text
-    e.target.textContent = newControl === 'input' ? '▬ / ▼' : '▼ / ▬';
+    button.innerHTML = newControl === 'input' ? '<strong>input</strong>/picker' : 'input/<strong>picker</strong>';
     
     // Show/hide controls
     const input = this.shadowRoot.getElementById(`${field}-input`);
     const select = this.shadowRoot.getElementById(`${field}-select`);
     
-    if (newControl === 'input') {
-      input.classList.remove('hidden');
-      select.classList.add('hidden');
-    } else {
-      input.classList.add('hidden');
-      select.classList.remove('hidden');
+    if (input && select) {
+      if (newControl === 'input') {
+        input.classList.remove('hidden');
+        select.classList.add('hidden');
+      } else {
+        input.classList.add('hidden');
+        select.classList.remove('hidden');
+      }
     }
     
     this.validate();
