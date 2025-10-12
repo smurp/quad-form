@@ -49,11 +49,11 @@ const COMMON_PROPERTIES = [
 
 // Mental space types with their templates
 const MENTAL_SPACE_TYPES = [
-  { value: 'mntl:lock', label: 'mntl:lock/{identity}/path', disabled: true },
-  { value: 'mntl:hold', label: 'mntl:hold/{identity}/path', disabled: true },
-  { value: 'mntl:gate', label: 'mntl:gate/{identity}/path', disabled: false },
-  { value: 'mntl:open', label: 'mntl:open/{identity}/path', disabled: false },
-  { value: 'mntl:publ', label: 'mntl:publ/path', disabled: false },
+  { value: 'mntl:lock', label: 'mntl:lock/{identity}', disabled: true },
+  { value: 'mntl:hold', label: 'mntl:hold/{identity}', disabled: true },
+  { value: 'mntl:gate', label: 'mntl:gate/{identity}', disabled: false },
+  { value: 'mntl:open', label: 'mntl:open/{identity}', disabled: false },
+  { value: 'mntl:publ', label: 'mntl:publ', disabled: false },
   { value: 'http:', label: 'http:', disabled: false },
   { value: 'https:', label: 'https:', disabled: false }
 ];
@@ -840,8 +840,7 @@ class QuadFormWC extends HTMLElement {
       <div class="field-group">
         <div class="field-controls">
           <label class="field-label">${label}</label>
-          
-          ${isGraph ? this.renderGraphMentalSpaceSelect() : this.renderTypeSelect(fieldName, fieldType, isObject)}
+          ${isGraph ? '' : this.renderTypeSelect(fieldName, fieldType, isObject)}
           
           <div class="spacer"></div>
           
@@ -889,12 +888,12 @@ class QuadFormWC extends HTMLElement {
       </div>
     `;
   }
-  
+
   renderGraphInput() {
-    const prefix = this.getGraphPrefix();
     const fullValue = this.fieldValues.graph || this._defaultGraph;
     
     // Extract path from full value
+    const prefix = this.getGraphPrefix();
     let path = this.graphPath;
     if (fullValue.startsWith(prefix)) {
       path = fullValue.substring(prefix.length);
@@ -902,7 +901,7 @@ class QuadFormWC extends HTMLElement {
     
     return `
       <div class="graph-input-wrapper">
-        <div class="graph-prefix" id="graph-prefix">${prefix}</div>
+        ${this.renderGraphMentalSpaceSelect()}
         <input type="text" 
                class="graph-path-input" 
                id="graph-path-input"
@@ -910,7 +909,7 @@ class QuadFormWC extends HTMLElement {
                value="${path}">
       </div>
     `;
-  }
+  }  
   
   renderGraphMentalSpaceSelect() {
     const identity = this._currentIdentity || '{identity}';
