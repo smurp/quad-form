@@ -50,20 +50,46 @@ const COMMON_PROPERTIES = [
 // Mental space types with their templates
 const MENTAL_SPACE_TYPES = [
   { value: 'mntl:lock', label: 'mntl:lock/{identity}', disabled: true,
-    description: ':lock - Owned by you, for you alone' },
+    description: 'mntl:lock - Owned by you, for you alone' },
   { value: 'mntl:hold', label: 'mntl:hold/{identity}', disabled: true,
-    description: ':hold - Owned by you, with detailed capabilities' },
+    description: 'mntl:hold - Owned by you, with detailed capabilities' },
   { value: 'mntl:gate', label: 'mntl:gate/{identity}', disabled: false,
-    description: ':gate - Owned by you, readable and writeable by whom you choose' },
+    description: 'mntl:gate - Owned by you, readable and writeable by whom you choose' },
   { value: 'mntl:open', label: 'mntl:open/{identity}', disabled: false,
-    description: ':open - Owned by you, readable by the world' },
+    description: 'mntl:open - Owned by you, readable by the world' },
   { value: 'mntl:publ', label: 'mntl:publ', disabled: false,
-    description: ':publ - A true public commons' }
+    description: 'mntl:publ - A true public commons' }
   // Disaabled (but previously supported)
   // It bears consideration whether there is any meaning in "writing to http"
   //{ value: 'http:', label: 'http:', disabled: false },
   //{ value: 'https:', label: 'https:', disabled: false }
 ];
+
+/**
+ * MMM canonical URN schemes (compact form without urn:mmm: prefix)
+ * These are complete identifiers, not CURIEs requiring prefix expansion
+ */
+const MMM_URN_SCHEMES = new Set([
+  'trpl',  // Triple entity: trpl:Base57Hash
+  'quad',  // Quad entity: quad:Base57Hash
+  'snip',  // Snippet entity: snip:Base57Hash
+  'atby',  // Attribution entity: atby:Base57Hash
+  'mntl',  // Mental space graph: mntl:publ/path or mntl:open/identity/path
+  'iii',   // Identity: iii:identifier
+  'time'   // Temporal reference: time:ISO8601
+]);
+
+/**
+ * Standard URI and URN schemes
+ * These are well-known identifiers that don't require prefix lookup
+ */
+const STANDARD_SCHEMES = new Set([
+  // Common URI schemes
+  'http', 'https', 'ftp', 'ftps', 'file', 'data',
+  'mailto', 'tel', 'sms', 'geo',
+  // Formal URN schemes
+  'urn', 'isbn', 'issn', 'doi', 'uuid', 'oid', 'lex'
+]);
 
 class QuadFormWC extends HTMLElement {
   constructor() {
@@ -200,29 +226,70 @@ class QuadFormWC extends HTMLElement {
     }
     return classes;
   }
-  
+
+  /**
+   * Validate a field value based on its type
+   *
+   * Supports three kinds of identifiers:
+   * 1. URNs - scheme:namespace-specific-string (e.g., trpl:abc123, mntl:publ/scratch)
+   * 2. URIs - scheme:hier-part (e.g., http://example.org/path)
+   * 3. CURIEs - prefix:localName where prefix is defined (e.g., foaf:knows)
+   *
+   * @param {string} field - Field name (subject, predicate, object)
+   * @param {string} value - Field value to validate
+   * @param {string} type - Expected type ('uri', 'qname', 'string', etc.)
+   * @returns {boolean} True if valid
+   */
   validateField(field, value, type) {
     if (!value || value.trim() === '') {
       return false;
     }
     
-    if (type === 'qname') {
-      // QName format: prefix:localName
-      const qnameRegex = /^[a-zA-Z_][\w-]*:[a-zA-Z_][\w-]*$/;
-      if (!qnameRegex.test(value)) {
+    if (type === 'uri' || type === 'qname') {
+      const colonIndex = value.indexOf(':');
+      
+      // Must contain a colon to be a valid identifier
+      if (colonIndex <= 0) {
         return false;
       }
-      // Check if prefix exists
-      const prefix = value.split(':')[0];
-      return this._prefixes.hasOwnProperty(prefix);
-    } else if (type === 'uri') {
-      // URI must contain ://
-      return value.includes('://');
+      
+      const scheme = value.substring(0, colonIndex).toLowerCase();
+      const nss = value.substring(colonIndex + 1); // Namespace Specific String or localName
+      
+      // Empty NSS/localName is invalid
+      if (nss.length === 0) {
+        return false;
+      }
+      
+      // MMM URN schemes - compact form (without urn:mmm: prefix)
+      // These are complete identifiers used internally in MMM
+      if (MMM_URN_SCHEMES.has(scheme)) {
+        return true;
+      }
+      
+      // Standard URI/URN schemes - recognized by IETF/W3C
+      if (STANDARD_SCHEMES.has(scheme)) {
+        return true;
+      }
+      
+      // Not a known URN/URI scheme, so it must be a CURIE
+      // Check if the prefix is defined in the prefix table
+      if (this._prefixes.hasOwnProperty(scheme)) {
+        // Validate CURIE localName format: must start with letter/underscore
+        // and contain only word characters and hyphens
+        return /^[a-zA-Z_][\w-]*$/.test(nss);
+      }
+      
+      // Unknown scheme and not a defined CURIE prefix - invalid
+      return false;
+      
     } else if (type === 'string') {
-      // Strings are always valid if not empty
+      // Plain string literals - always valid if non-empty
       return true;
+      
     } else {
-      // For other types (xsd:*), accept any non-empty value
+      // Other types (xsd:integer, xsd:date, etc.) - accept any non-empty value
+      // The HTML5 input type constraints will handle validation
       return true;
     }
   }
