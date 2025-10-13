@@ -49,11 +49,16 @@ const COMMON_PROPERTIES = [
 
 // Mental space types with their templates
 const MENTAL_SPACE_TYPES = [
-  { value: 'mntl:lock', label: 'mntl:lock/{identity}', disabled: true},
-  { value: 'mntl:hold', label: 'mntl:hold/{identity}', disabled: true },
-  { value: 'mntl:gate', label: 'mntl:gate/{identity}', disabled: false },
-  { value: 'mntl:open', label: 'mntl:open/{identity}', disabled: false },
-  { value: 'mntl:publ', label: 'mntl:publ', disabled: false }
+  { value: 'mntl:lock', label: 'mntl:lock/{identity}', disabled: true,
+    description: ':lock - Owned by you, for you alone' },
+  { value: 'mntl:hold', label: 'mntl:hold/{identity}', disabled: true,
+    description: ':hold - Owned by you, with detailed capabilities' },
+  { value: 'mntl:gate', label: 'mntl:gate/{identity}', disabled: false,
+    description: ':gate - Owned by you, readable and writeable by whom you choose' },
+  { value: 'mntl:open', label: 'mntl:open/{identity}', disabled: false,
+    description: ':open - Owned by you, readable by the world' },
+  { value: 'mntl:publ', label: 'mntl:publ', disabled: false,
+    description: ':publ - A true public commons' }
   // Disaabled (but previously supported)
   // It bears consideration whether there is any meaning in "writing to http"
   //{ value: 'http:', label: 'http:', disabled: false },
@@ -528,6 +533,14 @@ class QuadFormWC extends HTMLElement {
           outline: none;
         }
         
+        .graph-hint {
+          margin-left: 12px;
+          font-style: italic;
+          font-size: 0.9em;
+          color: #666;
+          font-weight: normal;
+        }
+        
         .hidden {
           display: none;
         }
@@ -839,6 +852,11 @@ class QuadFormWC extends HTMLElement {
       </div>
     `;
   }
+
+  getMentalSpaceDescription() {
+    const type = MENTAL_SPACE_TYPES.find(t => t.value === this.graphMentalSpace);
+    return type ? type.description : '';
+  }
   
   renderField(fieldName, label) {
     const fieldType = this.fieldTypes[fieldName];
@@ -846,10 +864,13 @@ class QuadFormWC extends HTMLElement {
     const isObject = fieldName === 'object';
     const isGraph = fieldName === 'graph';
     
+    // Get mental space description hint for Graph field
+    const graphHint = isGraph ? `<span class="graph-hint">${this.getMentalSpaceDescription()}</span>` : '';
+    
     return `
       <div class="field-group">
         <div class="field-controls">
-          <label class="field-label">${label}</label>
+          <label class="field-label">${label}${graphHint}</label>
           ${isGraph ? '' : this.renderTypeSelect(fieldName, fieldType, isObject)}
           
           <div class="spacer"></div>
@@ -898,7 +919,7 @@ class QuadFormWC extends HTMLElement {
       </div>
     `;
   }
-
+  
   renderGraphInput() {
     const fullValue = this.fieldValues.graph || this._defaultGraph;
     
@@ -1411,6 +1432,12 @@ class QuadFormWC extends HTMLElement {
     
     // Update full graph value
     this.fieldValues.graph = prefix + this.graphPath;
+    
+    // Update the hint text directly without re-rendering
+    const graphHint = this.shadowRoot.querySelector('.graph-hint');
+    if (graphHint) {
+      graphHint.textContent = this.getMentalSpaceDescription();
+    }
     
     this.validate();
   }
