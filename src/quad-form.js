@@ -53,7 +53,7 @@ const MENTAL_SPACE_TYPES = [
     description: 'mntl:lock - Owned by you, for you alone' },
   { value: 'mntl:hold', label: 'mntl:hold/{identity}', disabled: true,
     description: 'mntl:hold - Owned by you, with detailed capabilities' },
-  { value: 'mntl:gate', label: 'mntl:gate/{identity}', disabled: false,
+  { value: 'mntl:gate', label: 'mntl:gate/{identity}', disabled: true,
     description: 'mntl:gate - Owned by you, readable and writeable by whom you choose' },
   { value: 'mntl:open', label: 'mntl:open/{identity}', disabled: false,
     description: 'mntl:open - Owned by you, readable by the world' },
