@@ -1,6 +1,6 @@
 {
   "name": "@mmmlib/quad-form",
-  "version": "0.2.6",
+  "version": "0.2.8",
   "description": "A web component for creating RDF quads with CURIE support and XSD datatypes",
   "main": "dist/quad-form.js",
   "module": "src/quad-form.js",
@@ -47,5 +47,14 @@
   },
   "dependencies": {
     "@mmmlib/prefixes-form": "github:smurp/prefixes-form#main"
+  },
+  "exports": {
+    ".": {
+      "import": "./src/quad-form.js",
+      "default": "./src/quad-form.js"
+    },
+    "./src/*": "./src/*",
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
   }
 }
