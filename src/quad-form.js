@@ -1787,34 +1787,47 @@ class QuadFormWC extends HTMLElement {
       this.clear();
     }
   }
-  
+
   expandQName(value) {
-    if (!value || value.includes('://')) return value;
+    console.log('🔍 expandQName called with:', value);
+    
+    if (!value || value.includes('://')) {
+      console.log('  → Early return (empty or has ://)');
+      return value;
+    }
     
     const colonIndex = value.indexOf(':');
-    if (colonIndex === -1) return value;
+    if (colonIndex === -1) {
+      console.log('  → Early return (no colon)');
+      return value;
+    }
     
     const prefix = value.substring(0, colonIndex);
+    console.log('  → Extracted prefix:', prefix);
+    console.log('  → MMM_URN_SCHEMES:', MMM_URN_SCHEMES);
+    console.log('  → STANDARD_SCHEMES:', STANDARD_SCHEMES);
+    console.log('  → Is MMM URN?', MMM_URN_SCHEMES.has(prefix));
+    console.log('  → Is Standard URN?', STANDARD_SCHEMES.has(prefix));
+    
+    // CRITICAL: MMM URN schemes are complete identifiers, not CURIEs!
+    // They should NEVER be expanded
+    if (MMM_URN_SCHEMES.has(prefix) || STANDARD_SCHEMES.has(prefix)) {
+      console.log('  → Returning unchanged (URN scheme)');
+      return value;
+    }
+    
     const localPart = value.substring(colonIndex + 1);
+    console.log('  → localPart:', localPart);
+    console.log('  → Has prefix in _prefixes?', !!this._prefixes[prefix]);
     
     if (this._prefixes[prefix]) {
-      return this._prefixes[prefix] + localPart;
+      const expanded = this._prefixes[prefix] + localPart;
+      console.log('  → Expanding to:', expanded);
+      return expanded;
     }
     
+    console.log('  → Returning unchanged (no matching prefix)');
     return value;
-  }
-  
-  contractUri(uri) {
-    if (!uri || !uri.includes('://')) return uri;
-    
-    // Try to find a matching prefix
-    for (const [prefix, expansion] of Object.entries(this._prefixes)) {
-      if (uri.startsWith(expansion)) {
-        return prefix + ':' + uri.substring(expansion.length);
-      }
-    }
-    
-    return uri;
   }
   
   updateAttribution() {
