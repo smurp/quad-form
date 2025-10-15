@@ -153,6 +153,7 @@ class QuadFormWC extends HTMLElement {
     // Configuration
     this._mmmServer = null;
     this._prefixes = { ...COMMON_PREFIXES };
+    this._prefixesFormLoaded = false;
     this._currentIdentity = null;
     this._expandQNames = true;
     this._defaultGraph = 'mntl:publ/scratch';
@@ -1132,18 +1133,40 @@ class QuadFormWC extends HTMLElement {
     if (customElements.get('prefixes-form')) {
       try {
         const prefixesForm = document.createElement('prefixes-form');
-        prefixesForm.setAttribute('prefixes', JSON.stringify(this._prefixes));
         
+        // Pass current prefixes to the form by setting them individually
+        // (prefixes-form doesn't use a 'prefixes' attribute in default mode)
+        // It will load with DEFAULT_CHOSEN, then we'll add our custom ones
+        
+        // Listen for prefix events and update our internal _prefixes
         prefixesForm.addEventListener('prefix-added', (e) => {
           this._prefixes[e.detail.prefix] = e.detail.expansion;
+          console.log('Prefix added:', e.detail.prefix, '→', e.detail.expansion);
         });
         
-        prefixesForm.addEventListener('prefix-removed', (e) => {
+        prefixesForm.addEventListener('prefix-enabled', (e) => {
+          this._prefixes[e.detail.prefix] = e.detail.expansion;
+          console.log('Prefix enabled:', e.detail.prefix, '→', e.detail.expansion);
+        });
+        
+        prefixesForm.addEventListener('prefix-disabled', (e) => {
           delete this._prefixes[e.detail.prefix];
+          console.log('Prefix disabled:', e.detail.prefix);
         });
         
+        // Clear container and add the form
         container.innerHTML = '';
         container.appendChild(prefixesForm);
+        
+        // Store reference for later syncing
+        this._prefixesFormElement = prefixesForm;
+        
+        // After the form is connected and initialized, add our custom prefixes
+        // Use setTimeout to ensure the form's connectedCallback has run
+        setTimeout(() => {
+          this.syncPrefixesForm();
+        }, 50);
+        
         return;
       } catch (err) {
         console.warn('Error loading prefixes-form:', err);
@@ -1152,19 +1175,35 @@ class QuadFormWC extends HTMLElement {
     
     // Fallback: show a styled list of prefixes
     container.innerHTML = `
-      <h3 style="margin: 0 0 15px 0; color: #2196F3;">Current Prefixes</h3>
-      <div class="prefix-list">
-        ${Object.entries(this._prefixes).map(([prefix, url]) => `
-          <div class="prefix-item">
-            <span class="prefix-name">${prefix}:</span>
-            <span class="prefix-url">${url}</span>
-          </div>
-        `).join('')}
+    <h3 style="margin: 0 0 15px 0; color: #2196F3;">Current Prefixes</h3>
+    <div class="prefix-list">
+      ${Object.entries(this._prefixes).map(([prefix, url]) => `
+      <div class="prefix-item">
+      <span class="prefix-name">${prefix}:</span>
+      <span class="prefix-url">${url}</span>
       </div>
-      <p style="margin-top: 20px; font-size: 12px; color: #666;">
-        To edit prefixes, install the <code>prefixes-form</code> component.
-      </p>
-    `;
+      `).join('')}
+    </div>
+    <p style="margin-top: 20px; font-size: 12px; color: #666;">
+      To edit prefixes, install the <code>prefixes-form</code> component.
+    </p>
+  `;
+  }
+
+  syncPrefixesForm() {
+    if (!this._prefixesFormElement) return;
+    
+    // Get all currently selected prefixes from the form
+    const formPrefixes = this._prefixesFormElement.getSelectedPrefixes();
+    
+    // Add any prefixes from quad-form that aren't in the form yet
+    for (const [prefix, expansion] of Object.entries(this._prefixes)) {
+      if (!formPrefixes[prefix]) {
+        this._prefixesFormElement.addPrefix(prefix, expansion);
+      }
+    }
+    
+    console.log('Synced prefixes to form:', this._prefixes);
   }
   
   attachEventListeners() {
@@ -1853,6 +1892,15 @@ class QuadFormWC extends HTMLElement {
     const overlay = this.shadowRoot.getElementById('prefixes-overlay');
     if (overlay) {
       overlay.classList.add('visible');
+      
+      // Load prefixes-form on first show, or refresh if already loaded
+      if (!this._prefixesFormLoaded) {
+        this.loadPrefixesForm();
+        this._prefixesFormLoaded = true;
+      } else {
+        // If already loaded, just sync the current prefixes
+        this.syncPrefixesForm();
+      }
     }
   }
   
