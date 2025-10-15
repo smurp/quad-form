@@ -2,6 +2,8 @@
 
 A standalone web component for creating RDF quads with full CURIE support, XSD datatypes, and MMM integration. Drop-in replacement for QuadForm.js.
 
+![Quad Form Example](img/example1.png)
+
 ![npm version](https://img.shields.io/npm/v/@mmmlib/quad-form.svg)
 ![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)
 
