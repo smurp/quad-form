@@ -1,6 +1,12 @@
 /**
  * QuadFormWC - Web Component for RDF Quad Creation
  * Drop-in replacement for QuadForm.js with addtripleform.js behavior
+ * 
+ * Refactored for FULL|TINY|NANO mode unification:
+ * - Single unified DOM structure
+ * - CSS controls visibility via data-mode attribute
+ * - No renderContent() calls after initial render()
+ * - Event listeners attached once
  */
 
 // XSD to HTML5 input type mapping
@@ -59,10 +65,6 @@ const MENTAL_SPACE_TYPES = [
     description: 'mntl:open - Owned by you, readable by the world' },
   { value: 'mntl:publ', label: 'mntl:publ', disabled: false,
     description: 'mntl:publ - A true public commons' }
-  // Disaabled (but previously supported)
-  // It bears consideration whether there is any meaning in "writing to http"
-  //{ value: 'http:', label: 'http:', disabled: false },
-  //{ value: 'https:', label: 'https:', disabled: false }
 ];
 
 /**
@@ -137,7 +139,8 @@ class QuadFormWC extends HTMLElement {
     this.graphMentalSpace = 'mntl:publ';
     this.graphPath = '/scratch';
     
-    // Tiny mode state
+    // Mode state
+    this.nanoMode = false;
     this.tinyMode = false;
     this.tinyFieldTypes = {
       subject: 'qname',
@@ -179,11 +182,10 @@ class QuadFormWC extends HTMLElement {
   set currentIdentity(value) { 
     this._currentIdentity = value;
     this.updateAttribution();
-    // Re-render to update identity placeholders
-    if (this.shadowRoot.querySelector('.quad-form-container')) {
-      this.render();
-      this.attachEventListeners();
-      this.loadPrefixesForm();
+    // Update by-value if it exists
+    const byValue = this.shadowRoot?.getElementById('by-value');
+    if (byValue) {
+      byValue.textContent = value || 'not logged in';
     }
   }
   
@@ -296,11 +298,41 @@ class QuadFormWC extends HTMLElement {
   }
   
   updateFieldValidation() {
-    if (this.tinyMode) {
-      // Validate tiny mode fields
+    const container = this.shadowRoot.querySelector('.quad-form-container');
+    const mode = container?.dataset.mode || 'full';
+    
+    if (mode === 'nano') {
+      // In nano mode, only validate object
+      const input = this.shadowRoot.getElementById('object-input');
+      const textarea = this.shadowRoot.getElementById('object-textarea');
+      const activeInput = textarea && !textarea.classList.contains('hidden') ? textarea : input;
+      
+      if (activeInput) {
+        const type = this.fieldTypes.object;
+        const value = activeInput.value;
+        const isValid = this.validateField('object', value, type);
+        this.fieldValidity.object = isValid;
+        
+        if (value) {
+          activeInput.style.backgroundColor = isValid ? '#e8f5e9' : '#ffebee';
+        } else {
+          activeInput.style.backgroundColor = '';
+        }
+      }
+    } else if (mode === 'tiny') {
+      // Validate tiny mode fields (skip graph)
       ['subject', 'predicate', 'object'].forEach(field => {
-        const input = this.shadowRoot.getElementById(`tiny-${field}`);
-        if (input) {
+        let input;
+        
+        if (field === 'object' && this.objectUsesTextarea) {
+          // Use textarea for object if objectUsesTextarea is true
+          input = this.shadowRoot.getElementById('object-textarea');
+        } else {
+          // Use regular input for all other cases
+          input = this.shadowRoot.getElementById(`${field}-input`);
+        }
+        
+        if (input && !input.classList.contains('hidden')) {
           const type = this.tinyFieldTypes[field];
           const value = input.value;
           const isValid = this.validateField(field, value, type);
@@ -347,56 +379,116 @@ class QuadFormWC extends HTMLElement {
     }
   }
   
+  toggleNanoMode() {
+    const container = this.shadowRoot.querySelector('.quad-form-container');
+    
+    if (!this.nanoMode) {
+      // Entering nano mode
+      this.nanoMode = true;
+      this.tinyMode = false;
+      container.setAttribute('data-mode', 'nano');
+      
+      setTimeout(() => {
+        const objectInput = this.shadowRoot.getElementById('object-input');
+        const objectTextarea = this.shadowRoot.getElementById('object-textarea');
+        const activeInput = objectTextarea && !objectTextarea.classList.contains('hidden') ? 
+                           objectTextarea : objectInput;
+        if (activeInput) activeInput.focus();
+      }, 50);
+    }
+    // Note: Once in nano mode, can't go back (no UI controls visible)
+  }
+  
+  getObjectTinyType() {
+    // Determine tiny type for object based on full mode type
+    const fullType = this.fieldTypes.object;
+    
+    if (fullType === 'uri') return 'uri';
+    if (fullType === 'qname') return 'qname';
+    if (fullType === 'xsd:string') return 'string';
+    
+    // All other datatypes (xsd:dateTime, xsd:integer, etc) are literals with no decorators
+    return 'literal';
+  }
+  
   toggleTinyMode() {
     const container = this.shadowRoot.querySelector('.quad-form-container');
     
     if (!this.tinyMode) {
       // Entering tiny mode
       this.tinyMode = true;
+      this.nanoMode = false;
       
-      // Set all fields to qname input mode for tiny
+      // CRITICAL: Sync values from selects to inputs before switching modes
+      ['subject', 'predicate', 'object'].forEach(field => {
+        const select = this.shadowRoot.getElementById(`${field}-select`);
+        const input = this.shadowRoot.getElementById(`${field}-input`);
+        
+        // If using picker (select), copy value to input for tiny mode
+        if (select && !select.classList.contains('hidden') && select.value) {
+          this.fieldValues[field] = select.value;
+          if (input) input.value = select.value;
+        }
+      });
+      
+      // Sync field types from full mode
       this.tinyFieldTypes = {
-        subject: 'qname',
-        predicate: 'qname',
-        object: 'qname'
+        subject: this.fieldTypes.subject === 'uri' ? 'uri' : 'qname',
+        predicate: this.fieldTypes.predicate === 'uri' ? 'uri' : 'qname',
+        object: this.getObjectTinyType()
       };
       
-      // Add transitioning class
-      container.classList.add('transitioning-to-tiny');
+      container.setAttribute('data-mode', 'tiny');
       
-      // After animation, update DOM
+      // Sync textarea/input visibility for object field
+      const objectInput = this.shadowRoot.getElementById('object-input');
+      const objectTextarea = this.shadowRoot.getElementById('object-textarea');
+      
+      if (this.objectUsesTextarea) {
+        // Show textarea, hide input
+        if (objectInput) objectInput.classList.add('hidden');
+        if (objectTextarea) {
+          objectTextarea.classList.remove('hidden');
+          // Ensure textarea has the current value
+          if (this.fieldValues.object) {
+            objectTextarea.value = this.fieldValues.object;
+          }
+        }
+      } else {
+        // Show input, hide textarea
+        if (objectTextarea) objectTextarea.classList.add('hidden');
+        if (objectInput) {
+          objectInput.classList.remove('hidden');
+          // Ensure input has the current value
+          if (this.fieldValues.object) {
+            objectInput.value = this.fieldValues.object;
+          }
+        }
+      }
+      
+      // Update decorators based on field types
+      this.updateTinyDecorators();
+      
       setTimeout(() => {
-        container.classList.remove('transitioning-to-tiny');
-        container.classList.add('tiny-mode');
-        this.renderContent();
-        this.attachEventListeners();
-        
-        // Focus first field
-        setTimeout(() => {
-          const firstInput = this.shadowRoot.getElementById('tiny-subject');
-          if (firstInput) firstInput.focus();
-        }, 50);
+        const firstInput = this.shadowRoot.getElementById('subject-input');
+        if (firstInput) firstInput.focus();
       }, 400);
       
     } else {
       // Exiting tiny mode
       this.tinyMode = false;
+      container.setAttribute('data-mode', 'full');
       
-      // Add transitioning class
-      container.classList.add('transitioning-to-full');
-      container.classList.remove('tiny-mode');
-      
-      // After animation, update DOM
       setTimeout(() => {
-        container.classList.remove('transitioning-to-full');
-        this.renderContent();
-        this.attachEventListeners();
-        this.loadPrefixesForm();
+        const firstInput = this.shadowRoot.getElementById('subject-input');
+        if (firstInput) firstInput.focus();
       }, 400);
     }
   }
   
   render() {
+    const initialMode = this.nanoMode ? 'nano' : this.tinyMode ? 'tiny' : 'full';
+    
     this.shadowRoot.innerHTML = `
       <style>
         * { box-sizing: border-box; }
@@ -410,29 +502,122 @@ class QuadFormWC extends HTMLElement {
           transition: all 0.4s ease-in-out;
         }
         
-        /* Animation states */
-        .quad-form-container.transitioning-to-tiny .full-mode-content {
-          opacity: 0;
-          transform: scale(0.95);
+        /* NANO MODE - Transparent container, only object input visible */
+        [data-mode="nano"].quad-form-container {
+          padding: 0;
+          border: none;
+          background: transparent;
         }
         
-        .quad-form-container.transitioning-to-full .tiny-mode-content {
-          opacity: 0;
-          transform: scale(0.95);
-        }
-        
-        .full-mode-content,
-        .tiny-mode-content {
-          transition: opacity 0.4s ease-in-out, transform 0.4s ease-in-out;
-        }
-
-        
-        .quad-form-container.tiny-mode .full-mode-content {
+        [data-mode="nano"] .form-header,
+        [data-mode="nano"] .field-label,
+        [data-mode="nano"] .field-controls,
+        [data-mode="nano"] .subject-field,
+        [data-mode="nano"] .predicate-field,
+        [data-mode="nano"] .graph-field,
+        [data-mode="nano"] .tiny-decorator,
+        [data-mode="nano"] .tiny-period,
+        [data-mode="nano"] .form-actions {
           display: none;
         }
         
-        .quad-form-container:not(.tiny-mode) .tiny-mode-content {
+        [data-mode="nano"] .object-field {
+          width: 100%;
+          height: 100%;
+        }
+        
+        [data-mode="nano"] #object-input,
+        [data-mode="nano"] #object-textarea {
+          width: 100%;
+          height: 100%;
+          border: none;
+          background: transparent;
+          padding: 0;
+          margin: 0;
+          outline: none;
+        }
+        
+        /* TINY MODE - Horizontal inline layout */
+        [data-mode="tiny"] .form-header,
+        [data-mode="tiny"] .field-label,
+        [data-mode="tiny"] .field-controls,
+        [data-mode="tiny"] .graph-field,
+        [data-mode="tiny"] .submit-btn,
+        [data-mode="tiny"] .tiny-btn,
+        [data-mode="tiny"] .field-select {
           display: none;
+        }
+        
+        /* In tiny mode, show textarea OR input based on hidden class */
+        [data-mode="tiny"] #object-textarea:not(.hidden) {
+          display: inline-block;
+          border: none;
+          border-bottom: 2px solid #ddd;
+          border-radius: 0;
+          min-width: 16ch;
+          min-height: 2em;
+          padding: 4px 8px;
+          font-size: 14px;
+          resize: none;
+          vertical-align: top;
+        }
+        
+        [data-mode="tiny"] #object-input.hidden {
+          display: none;
+        }
+        
+        [data-mode="tiny"] .unified-content {
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        
+        [data-mode="tiny"] .field-group {
+          display: inline-flex;
+          align-items: center;
+          margin-bottom: 0;
+        }
+        
+        [data-mode="tiny"] .field-input {
+          display: inline-block;
+          border: none;
+          border-bottom: 2px solid #ddd;
+          border-radius: 0;
+          min-width: 16ch;
+          padding: 4px 8px;
+          font-size: 14px;
+        }
+        
+        [data-mode="tiny"] .tiny-decorator,
+        [data-mode="tiny"] .tiny-period,
+        [data-mode="tiny"] .submit-btn-tiny,
+        [data-mode="tiny"] .form-btn {
+          display: inline-block;
+        }
+        
+        [data-mode="tiny"] .form-actions {
+          display: flex;
+          border-top: none;
+          padding-top: 15px;
+        }
+        
+        /* FULL MODE - Normal vertical layout */
+        [data-mode="full"] .tiny-decorator,
+        [data-mode="full"] .tiny-period,
+        [data-mode="full"] .submit-btn-tiny,
+        [data-mode="full"] .form-btn {
+          display: none;
+        }
+        
+        [data-mode="full"] .field-group {
+          display: block;
+          margin-bottom: 15px;
+        }
+        
+        [data-mode="full"] .unified-content {
+          display: block;
         }
         
         /* Full mode styles */
@@ -610,40 +795,14 @@ class QuadFormWC extends HTMLElement {
         }
         
         .hidden {
-          display: none;
+          display: none !important;
         }
         
-        /* Tiny mode styles */
-        .tiny-line {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-        
-        .tiny-field-wrapper {
-          display: inline-flex;
-          align-items: center;
-        }
-        
+        /* Tiny mode decorators */
         .tiny-decorator {
           font-weight: 900;
           font-size: 16px;
           color: #666;
-        }
-        
-        .tiny-input {
-          border: none;
-          border-bottom: 2px solid #ddd;
-          font-family: monospace;
-          font-size: 14px;
-          padding: 4px 8px;
-          min-width: 16ch;
-        }
-        
-        .tiny-input:focus {
-          outline: none;
-          border-bottom-color: #4CAF50;
         }
         
         .tiny-period {
@@ -668,11 +827,6 @@ class QuadFormWC extends HTMLElement {
           margin-top: 20px;
           padding-top: 15px;
           border-top: 2px solid #e0e0e0;
-        }
-        
-        .quad-form-container.tiny-mode .form-actions {
-          border-top: none;
-          padding-top: 15px;
         }
         
         .submit-btn, .submit-btn-tiny, .clear-btn, .tiny-btn, .form-btn {
@@ -719,7 +873,8 @@ class QuadFormWC extends HTMLElement {
         }
         
         .tiny-btn {
-          display: none;
+          background: #2196F3;
+          color: white;
         }
         
         .form-btn {
@@ -810,10 +965,20 @@ class QuadFormWC extends HTMLElement {
           word-break: break-all;
           flex: 1;
         }
+        
+        /* Transitions */
+        .quad-form-container,
+        .field-group,
+        .field-input,
+        .tiny-decorator,
+        .form-header {
+          transition: opacity 0.4s ease-in-out, 
+                      transform 0.4s ease-in-out;
+        }
       </style>
       
-      <div class="quad-form-container">
-        <div class="content-wrapper"></div>
+      <div class="quad-form-container" data-mode="${initialMode}">
+        ${this.renderUnifiedContent()}
         
         <div class="prefixes-overlay" id="prefixes-overlay">
           <div class="prefixes-container">
@@ -824,126 +989,80 @@ class QuadFormWC extends HTMLElement {
       </div>
     `;
     
-    this.renderContent();
     this.updateAttribution();
   }
   
-  renderContent() {
-    const wrapper = this.shadowRoot.querySelector('.content-wrapper');
-    if (!wrapper) return;
-    
-    if (this.tinyMode) {
-      wrapper.innerHTML = `
-        <div class="tiny-mode-content">
-          <div class="tiny-line">
-            ${this.renderTinyField('subject')}
-            ${this.renderTinyField('predicate')}
-            ${this.renderTinyField('object')}
-            <span class="tiny-period">.</span>
-          </div>
-          
-          <div class="form-actions">
-            <button type="button" class="form-btn" id="form-btn" tabindex="4">Form</button>
-            <button type="button" class="clear-btn" id="clear-btn" tabindex="5">Clear</button>
-            <button type="button" class="submit-btn-tiny" id="submit-btn" tabindex="6">+</button>
-          </div>
-        </div>
-      `;
-    } else {
-      wrapper.innerHTML = `
-        <div class="full-mode-content">
-          <div class="form-header">
-            <h3>Say It</h3>
-            <div class="attribution">
-              <span><strong>at:</strong> <span id="at-value">—</span></span>
-              <span><strong>by:</strong> <span id="by-value">${this._currentIdentity || 'not logged in'}</span></span>
-            </div>
-            <button class="prefixes-btn" id="prefixes-btn">Prefixes</button>
-          </div>
-          
-          <form id="quad-form">
-            ${this.renderField('subject', 'Subject')}
-            ${this.renderField('predicate', 'Predicate')}
-            ${this.renderField('object', 'Object')}
-            ${this.renderField('graph', 'Graph')}
-            
-            <div class="form-actions">
-              <button type="button" class="tiny-btn" id="tiny-btn">Tiny</button>
-              <button type="button" class="clear-btn" id="clear-btn">Clear</button>
-              <button type="submit" class="submit-btn" id="submit-btn">Submit Quad</button>
-            </div>
-          </form>
-        </div>
-      `;
-    }
-  }
-  
-  renderTinyField(field) {
-    const type = this.tinyFieldTypes[field];
-    const value = this.fieldValues[field] || '';
-    
-    let leftDecorator = '';
-    let rightDecorator = '';
-    let placeholder = '';
-    
-    if (type === 'uri') {
-      leftDecorator = '<span class="tiny-decorator">&lt;</span>';
-      rightDecorator = '<span class="tiny-decorator">&gt;</span>';
-      placeholder = 'http://example.org/' + field;
-    } else if (type === 'string') {
-      leftDecorator = '<span class="tiny-decorator">"</span>';
-      rightDecorator = '<span class="tiny-decorator">"</span>';
-      placeholder = 'text value';
-    } else {
-      // qname
-      placeholder = field === 'predicate' ? 'foaf:knows' : 'ex:' + field.charAt(0).toUpperCase() + field.slice(1);
-    }
-    
-    const langField = (field === 'object' && type === 'string') 
-      ? `<span class="tiny-decorator">@</span><input type="text" class="tiny-lang" id="tiny-lang" value="${this.objectLanguage}" maxlength="3" tabindex="4">`
-      : '';
-    
-    const tabIndex = field === 'subject' ? '1' : field === 'predicate' ? '2' : '3';
-    
+  renderUnifiedContent() {
     return `
-      <div class="tiny-field-wrapper">
-        ${leftDecorator}
-        <input type="text" 
-               class="tiny-input" 
-               id="tiny-${field}"
-               data-field="${field}"
-               value="${value}"
-               placeholder="${placeholder}"
-               tabindex="${tabIndex}">
-        ${rightDecorator}
-        ${langField}
-      </div>
-    `;
-  }
-
-  getMentalSpaceDescription() {
-    const type = MENTAL_SPACE_TYPES.find(t => t.value === this.graphMentalSpace);
-    return type ? type.description : '';
-  }
-  
-  renderField(fieldName, label) {
-    const fieldType = this.fieldTypes[fieldName];
-    const controlType = this.fieldControls[fieldName];
-    const isObject = fieldName === 'object';
-    const isGraph = fieldName === 'graph';
-    
-    // Get mental space description hint for Graph field
-    const graphHint = isGraph ? `<span class="graph-hint">${this.getMentalSpaceDescription()}</span>` : '';
-    
-    return `
-      <div class="field-group">
-        <div class="field-controls">
-          <label class="field-label">${label}${graphHint}</label>
-          ${isGraph ? '' : this.renderTypeSelect(fieldName, fieldType, isObject)}
-          
-          <div class="spacer"></div>
-          
-          ${isObject && !this.objectUsesTextarea ? `
+      <div class="unified-content">
+        <!-- Form header (visible: full only) -->
+        <div class="form-header">
+          <h3>Say It</h3>
+          <div class="attribution">
+            <span><strong>at:</strong> <span id="at-value">—</span></span>
+            <span><strong>by:</strong> <span id="by-value">${this._currentIdentity || 'not logged in'}</span></span>
+          </div>
+          <button class="prefixes-btn" id="prefixes-btn">Prefixes</button>
+        </div>
+        
+        <!-- Subject field -->
+        <div class="field-group subject-field">
+          <div class="field-controls">
+            <label class="field-label">Subject</label>
+            ${this.renderStandardTypeOptions('subject', this.fieldTypes.subject)}
+            <div class="spacer"></div>
+            <button type="button" class="control-toggle" data-field="subject">
+              ${this.fieldControls.subject === 'input' ? '<strong>input</strong>/picker' : 'input/<strong>picker</strong>'}
+            </button>
+          </div>
+          <span class="tiny-decorator subject-left">&lt;</span>
+          <input type="text" 
+                 class="field-input ${this.fieldControls.subject === 'select' ? 'hidden' : ''}" 
+                 id="subject-input"
+                 data-field="subject"
+                 placeholder="${this.getPlaceholder('subject', this.fieldTypes.subject)}"
+                 value="${this.fieldValues.subject}">
+          <span class="tiny-decorator subject-right">&gt;</span>
+          <select class="field-select ${this.fieldControls.subject === 'input' ? 'hidden' : ''}" 
+                  id="subject-select"
+                  data-field="subject">
+            <option value="">Select Subject...</option>
+            ${this.renderSelectOptions('subject')}
+          </select>
+        </div>
+        
+        <!-- Predicate field -->
+        <div class="field-group predicate-field">
+          <div class="field-controls">
+            <label class="field-label">Predicate</label>
+            ${this.renderStandardTypeOptions('predicate', this.fieldTypes.predicate)}
+            <div class="spacer"></div>
+            <button type="button" class="control-toggle" data-field="predicate">
+              ${this.fieldControls.predicate === 'input' ? '<strong>input</strong>/picker' : 'input/<strong>picker</strong>'}
+            </button>
+          </div>
+          <span class="tiny-decorator predicate-left"></span>
+          <input type="text" 
+                 class="field-input ${this.fieldControls.predicate === 'select' ? 'hidden' : ''}" 
+                 id="predicate-input"
+                 data-field="predicate"
+                 placeholder="${this.getPlaceholder('predicate', this.fieldTypes.predicate)}"
+                 value="${this.fieldValues.predicate}">
+          <span class="tiny-decorator predicate-right"></span>
+          <select class="field-select ${this.fieldControls.predicate === 'input' ? 'hidden' : ''}" 
+                  id="predicate-select"
+                  data-field="predicate">
+            <option value="">Select Predicate...</option>
+            ${this.renderSelectOptions('predicate')}
+          </select>
+        </div>
+        
+        <!-- Object field -->
+        <div class="field-group object-field">
+          <div class="field-controls">
+            <label class="field-label">Object</label>
+            ${this.renderObjectTypeOptions(this.fieldTypes.object)}
+            <div class="spacer"></div>
             <input type="text" 
                    class="language-input" 
                    id="language-input"
@@ -953,39 +1072,57 @@ class QuadFormWC extends HTMLElement {
                    pattern="^([a-z]{2}|[a-z]{3})?$"
                    ${!this.objectUsesTextarea ? 'disabled' : ''}
                    value="${this.objectLanguage}">
-          ` : ''}
-          
-          ${!isGraph ? `
-            <button type="button" class="control-toggle" data-field="${fieldName}">
-              ${controlType === 'input' ? '<strong>input</strong>/picker' : 'input/<strong>picker</strong>'}
+            <button type="button" class="control-toggle" data-field="object">
+              ${this.fieldControls.object === 'input' ? '<strong>input</strong>/picker' : 'input/<strong>picker</strong>'}
             </button>
-          ` : ''}
-        </div>
-        
-        ${!isGraph ? `
-          <input type="text" 
-                 class="field-input ${controlType === 'select' || (isObject && this.objectUsesTextarea) ? 'hidden' : ''}" 
-                 id="${fieldName}-input"
-                 data-field="${fieldName}"
-                 placeholder="${this.getPlaceholder(fieldName, fieldType)}"
-                 value="${this.fieldValues[fieldName]}">
-          
-          <select class="field-select ${controlType === 'input' ? 'hidden' : ''}" 
-                  id="${fieldName}-select"
-                  data-field="${fieldName}">
-            <option value="">Select ${label}...</option>
-            ${this.renderSelectOptions(fieldName)}
-          </select>
-          
-          ${isObject ? `
+          </div>
+          <span class="tiny-decorator object-left">&lt;</span>
+          <div class="object-input-wrapper">
+            <input type="text" 
+                   class="field-input ${this.fieldControls.object === 'select' || this.objectUsesTextarea ? 'hidden' : ''}" 
+                   id="object-input"
+                   data-field="object"
+                   placeholder="${this.getPlaceholder('object', this.fieldTypes.object)}"
+                   value="${this.fieldValues.object}">
             <textarea class="field-textarea ${!this.objectUsesTextarea ? 'hidden' : ''}"
                       id="object-textarea"
                       data-field="object"
                       placeholder="Enter text content...">${this.fieldValues.object}</textarea>
-          ` : ''}
-        ` : this.renderGraphInput()}
+          </div>
+          <span class="tiny-decorator object-right">&gt;</span>
+          <select class="field-select ${this.fieldControls.object === 'input' ? 'hidden' : ''}" 
+                  id="object-select"
+                  data-field="object">
+            <option value="">Select Object...</option>
+            ${this.renderSelectOptions('object')}
+          </select>
+        </div>
+        
+        <span class="tiny-period">.</span>
+        
+        <!-- Graph field -->
+        <div class="field-group graph-field">
+          <div class="field-controls">
+            <label class="field-label">Graph<span class="graph-hint">${this.getMentalSpaceDescription()}</span></label>
+          </div>
+          ${this.renderGraphInput()}
+        </div>
+        
+        <!-- Form actions -->
+        <div class="form-actions">
+          <button type="button" class="tiny-btn" id="tiny-btn">Tiny</button>
+          <button type="button" class="form-btn" id="form-btn">Form</button>
+          <button type="button" class="clear-btn" id="clear-btn">Clear</button>
+          <button type="submit" class="submit-btn" id="submit-btn">Submit Quad</button>
+          <button type="button" class="submit-btn-tiny" id="submit-btn-tiny">+</button>
+        </div>
       </div>
     `;
+  }
+
+  getMentalSpaceDescription() {
+    const type = MENTAL_SPACE_TYPES.find(t => t.value === this.graphMentalSpace);
+    return type ? type.description : '';
   }
   
   renderGraphInput() {
@@ -1022,13 +1159,6 @@ class QuadFormWC extends HTMLElement {
         }).join('')}
       </select>
     `;
-  }
-  
-  renderTypeSelect(fieldName, fieldType, isObject) {
-    if (isObject) {
-      return this.renderObjectTypeOptions(fieldType);
-    }
-    return this.renderStandardTypeOptions(fieldName, fieldType);
   }
   
   renderStandardTypeOptions(fieldName, currentType) {
@@ -1134,35 +1264,23 @@ class QuadFormWC extends HTMLElement {
       try {
         const prefixesForm = document.createElement('prefixes-form');
         
-        // Pass current prefixes to the form by setting them individually
-        // (prefixes-form doesn't use a 'prefixes' attribute in default mode)
-        // It will load with DEFAULT_CHOSEN, then we'll add our custom ones
-        
         // Listen for prefix events and update our internal _prefixes
         prefixesForm.addEventListener('prefix-added', (e) => {
           this._prefixes[e.detail.prefix] = e.detail.expansion;
-          console.log('Prefix added:', e.detail.prefix, '→', e.detail.expansion);
         });
         
         prefixesForm.addEventListener('prefix-enabled', (e) => {
           this._prefixes[e.detail.prefix] = e.detail.expansion;
-          console.log('Prefix enabled:', e.detail.prefix, '→', e.detail.expansion);
         });
         
         prefixesForm.addEventListener('prefix-disabled', (e) => {
           delete this._prefixes[e.detail.prefix];
-          console.log('Prefix disabled:', e.detail.prefix);
         });
         
-        // Clear container and add the form
         container.innerHTML = '';
         container.appendChild(prefixesForm);
-        
-        // Store reference for later syncing
         this._prefixesFormElement = prefixesForm;
         
-        // After the form is connected and initialized, add our custom prefixes
-        // Use setTimeout to ensure the form's connectedCallback has run
         setTimeout(() => {
           this.syncPrefixesForm();
         }, 50);
@@ -1193,219 +1311,36 @@ class QuadFormWC extends HTMLElement {
   syncPrefixesForm() {
     if (!this._prefixesFormElement) return;
     
-    // Get all currently selected prefixes from the form
     const formPrefixes = this._prefixesFormElement.getSelectedPrefixes();
     
-    // Add any prefixes from quad-form that aren't in the form yet
     for (const [prefix, expansion] of Object.entries(this._prefixes)) {
       if (!formPrefixes[prefix]) {
         this._prefixesFormElement.addPrefix(prefix, expansion);
       }
     }
-    
-    console.log('Synced prefixes to form:', this._prefixes);
   }
   
   attachEventListeners() {
-    if (this.tinyMode) {
-      this.attachTinyModeListeners();
-    } else {
-      this.attachFullModeListeners();
+    // Mode toggle buttons
+    const tinyBtn = this.shadowRoot.getElementById('tiny-btn');
+    if (tinyBtn) {
+      tinyBtn.addEventListener('click', () => this.toggleTinyMode());
     }
-  }
-  
-  attachTinyModeListeners() {
-    // Form button
+    
     const formBtn = this.shadowRoot.getElementById('form-btn');
     if (formBtn) {
       formBtn.addEventListener('click', () => this.toggleTinyMode());
     }
     
-    // Clear button
-    const clearBtn = this.shadowRoot.getElementById('clear-btn');
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => this.clear());
-    }
-    
-    // Submit button
+    // Submit buttons (both regular and tiny)
     const submitBtn = this.shadowRoot.getElementById('submit-btn');
     if (submitBtn) {
       submitBtn.addEventListener('click', (e) => this.handleSubmit(e));
     }
     
-    // Field inputs
-    ['subject', 'predicate', 'object'].forEach(field => {
-      const input = this.shadowRoot.getElementById(`tiny-${field}`);
-      if (input) {
-        input.addEventListener('input', (e) => {
-          this.fieldValues[field] = e.target.value;
-          this.updateFieldValidation();
-        });
-        
-        input.addEventListener('keydown', (e) => this.handleTinyKeydown(e, field));
-      }
-    });
-    
-    // Language input
-    const langInput = this.shadowRoot.getElementById('tiny-lang');
-    if (langInput) {
-      langInput.addEventListener('input', (e) => {
-        let value = e.target.value.replace(/^@/, '').toLowerCase();
-        if (value.length === 1) {
-          e.target.value = '';
-          this.objectLanguage = '';
-        } else {
-          this.objectLanguage = value;
-        }
-      });
-      
-      langInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Tab' && !e.shiftKey) {
-          e.preventDefault();
-          this.shadowRoot.getElementById('form-btn').focus();
-        }
-      });
-    }
-  }
-  
-  handleTinyKeydown(e, field) {
-    // Tab key - control tab order
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      
-      if (e.shiftKey) {
-        // Shift+Tab - go backwards
-        if (field === 'subject') {
-          this.shadowRoot.getElementById('submit-btn').focus();
-        } else if (field === 'predicate') {
-          this.shadowRoot.getElementById('tiny-subject').focus();
-        } else if (field === 'object') {
-          const langInput = this.shadowRoot.getElementById('tiny-lang');
-          if (langInput && !langInput.classList.contains('hidden')) {
-            // Skip to predicate if lang is showing
-            this.shadowRoot.getElementById('tiny-predicate').focus();
-          } else {
-            this.shadowRoot.getElementById('tiny-predicate').focus();
-          }
-        }
-      } else {
-        // Tab - go forwards
-        if (field === 'subject') {
-          this.shadowRoot.getElementById('tiny-predicate').focus();
-        } else if (field === 'predicate') {
-          this.shadowRoot.getElementById('tiny-object').focus();
-        } else if (field === 'object') {
-          const langInput = this.shadowRoot.getElementById('tiny-lang');
-          if (langInput && !langInput.classList.contains('hidden') && this.tinyFieldTypes.object === 'string') {
-            langInput.focus();
-          } else {
-            this.shadowRoot.getElementById('form-btn').focus();
-          }
-        }
-      }
-      return;
-    }
-    
-    // ESC - toggle field type
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      this.cycleTinyFieldType(field);
-      return;
-    }
-    
-    // Up arrow - previous picker value
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      this.cycleTinyPicker(field, -1);
-      return;
-    }
-    
-    // Down arrow - next picker value
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      this.cycleTinyPicker(field, 1);
-      return;
-    }
-    
-    // Enter - submit
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      this.handleSubmit(e);
-      return;
-    }
-  }
-  
-  cycleTinyFieldType(field) {
-    const current = this.tinyFieldTypes[field];
-    
-    if (field === 'object') {
-      // Object cycles: qname -> uri -> string -> qname
-      if (current === 'qname') {
-        this.tinyFieldTypes[field] = 'uri';
-      } else if (current === 'uri') {
-        this.tinyFieldTypes[field] = 'string';
-      } else {
-        this.tinyFieldTypes[field] = 'qname';
-      }
-    } else {
-      // Subject/Predicate toggle: qname <-> uri
-      this.tinyFieldTypes[field] = current === 'qname' ? 'uri' : 'qname';
-    }
-    
-    // Convert value if needed
-    const currentValue = this.fieldValues[field];
-    if (currentValue) {
-      if (this.tinyFieldTypes[field] === 'uri' && current === 'qname') {
-        this.fieldValues[field] = this.expandQName(currentValue);
-      } else if (this.tinyFieldTypes[field] === 'qname' && current === 'uri') {
-        this.fieldValues[field] = this.contractUri(currentValue);
-      }
-    }
-    
-    this.renderContent();
-    this.attachEventListeners();
-    
-    // Re-focus the field
-    setTimeout(() => {
-      const input = this.shadowRoot.getElementById(`tiny-${field}`);
-      if (input) {
-        input.focus();
-        this.updateFieldValidation();
-      }
-    }, 0);
-  }
-  
-  cycleTinyPicker(field, direction) {
-    const values = this.getPickerValues(field);
-    if (values.length === 0) return;
-    
-    const currentIndex = this.tinyPickerIndices[field];
-    let newIndex = currentIndex + direction;
-    
-    // Wrap around
-    if (newIndex < 0) newIndex = values.length - 1;
-    if (newIndex >= values.length) newIndex = 0;
-    
-    this.tinyPickerIndices[field] = newIndex;
-    this.fieldValues[field] = values[newIndex];
-    
-    const input = this.shadowRoot.getElementById(`tiny-${field}`);
-    if (input) {
-      input.value = values[newIndex];
-      this.updateFieldValidation();
-    }
-  }
-  
-  attachFullModeListeners() {
-    const form = this.shadowRoot.getElementById('quad-form');
-    if (form) {
-      form.addEventListener('submit', this.handleSubmit.bind(this));
-    }
-    
-    // Tiny button
-    const tinyBtn = this.shadowRoot.getElementById('tiny-btn');
-    if (tinyBtn) {
-      tinyBtn.addEventListener('click', () => this.toggleTinyMode());
+    const submitBtnTiny = this.shadowRoot.getElementById('submit-btn-tiny');
+    if (submitBtnTiny) {
+      submitBtnTiny.addEventListener('click', (e) => this.handleSubmit(e));
     }
     
     // Clear button
@@ -1439,26 +1374,104 @@ class QuadFormWC extends HTMLElement {
       btn.addEventListener('click', this.handleControlToggle.bind(this));
     });
     
-    // Field inputs
-    this.shadowRoot.querySelectorAll('.field-input, .field-select, .field-textarea').forEach(input => {
-      input.addEventListener('input', (e) => {
-        this.handleFieldChange(e);
-        this.updateFieldValidation();
-      });
-      input.addEventListener('change', (e) => {
-        this.handleFieldChange(e);
-        this.updateFieldValidation();
-      });
+    // Field inputs - ALL fields (subject, predicate, object)
+    ['subject', 'predicate', 'object'].forEach(field => {
+      const input = this.shadowRoot.getElementById(`${field}-input`);
+      if (input) {
+        input.addEventListener('input', (e) => {
+          this.fieldValues[field] = e.target.value;
+          this.updateFieldValidation();
+          
+          // Emit field-changed event
+          this.dispatchEvent(new CustomEvent('field-changed', {
+            detail: { field, value: e.target.value },
+            bubbles: true,
+            composed: true
+          }));
+          
+          this.validate();
+        });
+        
+        // Tiny mode keyboard navigation
+        input.addEventListener('keydown', (e) => {
+          const container = this.shadowRoot.querySelector('.quad-form-container');
+          const mode = container?.dataset.mode;
+          
+          if (mode === 'tiny') {
+            this.handleTinyKeydown(e, field);
+          }
+        });
+        
+        // Nano mode - emit on blur
+        input.addEventListener('blur', (e) => {
+          const container = this.shadowRoot.querySelector('.quad-form-container');
+          const mode = container?.dataset.mode;
+          
+          if (mode === 'nano' && field === 'object') {
+            this.handleSubmit(e);
+          }
+        });
+      }
+      
+      // Field selects
+      const select = this.shadowRoot.getElementById(`${field}-select`);
+      if (select) {
+        select.addEventListener('change', (e) => {
+          this.fieldValues[field] = e.target.value;
+          this.updateFieldValidation();
+          
+          this.dispatchEvent(new CustomEvent('field-changed', {
+            detail: { field, value: e.target.value },
+            bubbles: true,
+            composed: true
+          }));
+          
+          this.validate();
+        });
+      }
     });
+    
+    // Object textarea
+    const objectTextarea = this.shadowRoot.getElementById('object-textarea');
+    if (objectTextarea) {
+      objectTextarea.addEventListener('input', (e) => {
+        this.fieldValues.object = e.target.value;
+        this.updateFieldValidation();
+        
+        this.dispatchEvent(new CustomEvent('field-changed', {
+          detail: { field: 'object', value: e.target.value },
+          bubbles: true,
+          composed: true
+        }));
+        
+        this.validate();
+      });
+      
+      objectTextarea.addEventListener('keydown', (e) => {
+        const container = this.shadowRoot.querySelector('.quad-form-container');
+        const mode = container?.dataset.mode;
+        
+        if (mode === 'tiny') {
+          this.handleTinyKeydown(e, 'object');
+        }
+      });
+      
+      objectTextarea.addEventListener('blur', (e) => {
+        const container = this.shadowRoot.querySelector('.quad-form-container');
+        const mode = container?.dataset.mode;
+        
+        if (mode === 'nano') {
+          this.handleSubmit(e);
+        }
+      });
+    }
     
     // Language input
     const languageInput = this.shadowRoot.getElementById('language-input');
     if (languageInput) {
       languageInput.addEventListener('input', (e) => {
-        // Only allow 0, 2, or 3 characters
         let value = e.target.value.replace(/^@/, '').toLowerCase();
         if (value.length === 1) {
-          // Don't allow single character
           e.target.value = '';
           this.objectLanguage = '';
         } else {
@@ -1489,6 +1502,152 @@ class QuadFormWC extends HTMLElement {
     }
   }
   
+  handleTinyKeydown(e, field) {
+    // Check if we're in a textarea (for object field with markdown/string types)
+    const isTextarea = e.target.tagName === 'TEXTAREA';
+    
+    // Tab key - control tab order
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      
+      if (e.shiftKey) {
+        // Shift+Tab - go backwards
+        if (field === 'subject') {
+          this.shadowRoot.getElementById('submit-btn-tiny').focus();
+        } else if (field === 'predicate') {
+          this.shadowRoot.getElementById('subject-input').focus();
+        } else if (field === 'object') {
+          this.shadowRoot.getElementById('predicate-input').focus();
+        }
+      } else {
+        // Tab - go forwards
+        if (field === 'subject') {
+          this.shadowRoot.getElementById('predicate-input').focus();
+        } else if (field === 'predicate') {
+          // Focus object - could be input or textarea
+          if (this.objectUsesTextarea) {
+            this.shadowRoot.getElementById('object-textarea').focus();
+          } else {
+            this.shadowRoot.getElementById('object-input').focus();
+          }
+        } else if (field === 'object') {
+          this.shadowRoot.getElementById('form-btn').focus();
+        }
+      }
+      return;
+    }
+    
+    // ESC - toggle field type (not for textarea since it might have content)
+    if (e.key === 'Escape' && !isTextarea) {
+      e.preventDefault();
+      this.cycleTinyFieldType(field);
+      return;
+    }
+    
+    // Up/Down arrows - previous/next picker value (not for textarea)
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !isTextarea) {
+      e.preventDefault();
+      const direction = e.key === 'ArrowUp' ? -1 : 1;
+      this.cycleTinyPicker(field, direction);
+      return;
+    }
+    
+    // Enter - submit (but only if not in textarea, where Enter should insert newline)
+    if (e.key === 'Enter' && !isTextarea) {
+      e.preventDefault();
+      this.handleSubmit(e);
+      return;
+    }
+    
+    // Ctrl+Enter or Cmd+Enter in textarea - submit
+    if (e.key === 'Enter' && isTextarea && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      this.handleSubmit(e);
+      return;
+    }
+  }
+  
+  updateTinyDecorators() {
+    // Update decorators based on tinyFieldTypes
+    ['subject', 'predicate', 'object'].forEach(field => {
+      const type = this.tinyFieldTypes[field];
+      const leftDecorator = this.shadowRoot.querySelector(`.tiny-decorator.${field}-left`);
+      const rightDecorator = this.shadowRoot.querySelector(`.tiny-decorator.${field}-right`);
+      
+      if (type === 'uri') {
+        if (leftDecorator) leftDecorator.textContent = '<';
+        if (rightDecorator) rightDecorator.textContent = '>';
+      } else if (type === 'string') {
+        if (leftDecorator) leftDecorator.textContent = '"';
+        if (rightDecorator) rightDecorator.textContent = '"';
+      } else {
+        // qname - no decorators
+        if (leftDecorator) leftDecorator.textContent = '';
+        if (rightDecorator) rightDecorator.textContent = '';
+      }
+    });
+  }
+  
+  cycleTinyFieldType(field) {
+    const current = this.tinyFieldTypes[field];
+    
+    if (field === 'object') {
+      // Object cycles: qname -> uri -> string -> qname
+      if (current === 'qname') {
+        this.tinyFieldTypes[field] = 'uri';
+      } else if (current === 'uri') {
+        this.tinyFieldTypes[field] = 'string';
+      } else {
+        this.tinyFieldTypes[field] = 'qname';
+      }
+    } else {
+      // Subject/Predicate toggle: qname <-> uri
+      this.tinyFieldTypes[field] = current === 'qname' ? 'uri' : 'qname';
+    }
+    
+    // Convert value if needed
+    const currentValue = this.fieldValues[field];
+    if (currentValue) {
+      if (this.tinyFieldTypes[field] === 'uri' && current === 'qname') {
+        this.fieldValues[field] = this.expandQName(currentValue);
+      } else if (this.tinyFieldTypes[field] === 'qname' && current === 'uri') {
+        this.fieldValues[field] = this.contractUri(currentValue);
+      }
+    }
+    
+    // Update decorators
+    this.updateTinyDecorators();
+    
+    // Update the input value
+    const input = this.shadowRoot.getElementById(`${field}-input`);
+    if (input) {
+      input.value = this.fieldValues[field];
+      input.focus();
+      this.updateFieldValidation();
+    }
+  }
+  
+  cycleTinyPicker(field, direction) {
+    const values = this.getPickerValues(field);
+    if (values.length === 0) return;
+    
+    const currentIndex = this.tinyPickerIndices[field];
+    let newIndex = currentIndex + direction;
+    
+    // Wrap around
+    if (newIndex < 0) newIndex = values.length - 1;
+    if (newIndex >= values.length) newIndex = 0;
+    
+    this.tinyPickerIndices[field] = newIndex;
+    this.fieldValues[field] = values[newIndex];
+    
+    const input = this.shadowRoot.getElementById(`${field}-input`);
+    if (input) {
+      input.value = values[newIndex];
+      this.updateFieldValidation();
+    }
+  }
+  
   handleGraphPathChange(e) {
     const path = e.target.value;
     this.graphPath = path;
@@ -1515,14 +1674,9 @@ class QuadFormWC extends HTMLElement {
     this.graphMentalSpace = newSpace;
     
     // Update graph prefix and input
-    const graphPrefix = this.shadowRoot.getElementById('graph-prefix');
     const graphPathInput = this.shadowRoot.getElementById('graph-path-input');
     
     const prefix = this.getGraphPrefix();
-    
-    if (graphPrefix) {
-      graphPrefix.textContent = prefix;
-    }
     
     if (graphPathInput) {
       if (newSpace === 'http:' || newSpace === 'https:') {
@@ -1566,12 +1720,10 @@ class QuadFormWC extends HTMLElement {
       const currentValue = input.value || this.fieldValues[field];
       
       if (oldType === 'qname' && newType === 'uri') {
-        // Expand QName to URI
         const expanded = this.expandQName(currentValue);
         input.value = expanded;
         this.fieldValues[field] = expanded;
       } else if (oldType === 'uri' && newType === 'qname') {
-        // Contract URI to QName
         const contracted = this.contractUri(currentValue);
         input.value = contracted;
         this.fieldValues[field] = contracted;
@@ -1584,20 +1736,20 @@ class QuadFormWC extends HTMLElement {
       const objectTextarea = this.shadowRoot.getElementById('object-textarea');
       const languageInput = this.shadowRoot.getElementById('language-input');
       
-      // Convert between QName and URI for object field too
+      // Get current value from whichever input is active
       const currentValue = objectInput?.value || objectTextarea?.value || this.fieldValues.object;
       
+      // Convert between QName and URI for object field if needed
+      let valueToUse = currentValue;
       if (oldType === 'qname' && newType === 'uri') {
-        const expanded = this.expandQName(currentValue);
-        if (objectInput) objectInput.value = expanded;
-        if (objectTextarea) objectTextarea.value = expanded;
-        this.fieldValues.object = expanded;
+        valueToUse = this.expandQName(currentValue);
       } else if (oldType === 'uri' && newType === 'qname') {
-        const contracted = this.contractUri(currentValue);
-        if (objectInput) objectInput.value = contracted;
-        if (objectTextarea) objectTextarea.value = contracted;
-        this.fieldValues.object = contracted;
+        valueToUse = this.contractUri(currentValue);
       }
+      // For all other transitions (literal to literal), preserve the value as-is
+      
+      // Update the internal state
+      this.fieldValues.object = valueToUse;
       
       // Determine if we should use textarea
       const shouldUseTextarea = newType === 'xsd:string' || 
@@ -1608,18 +1760,13 @@ class QuadFormWC extends HTMLElement {
       
       this.objectUsesTextarea = shouldUseTextarea;
       
-      // Show/hide appropriate input
+      // Show/hide appropriate input and set the value
       if (shouldUseTextarea) {
         if (objectInput) objectInput.classList.add('hidden');
         if (objectTextarea) {
           objectTextarea.classList.remove('hidden');
-          // Transfer value if switching
-          if (objectInput && objectInput.value) {
-            objectTextarea.value = objectInput.value;
-            this.fieldValues.object = objectInput.value;
-          }
+          objectTextarea.value = valueToUse;
         }
-        // Enable language input for textarea
         if (languageInput) {
           languageInput.disabled = false;
         }
@@ -1627,11 +1774,7 @@ class QuadFormWC extends HTMLElement {
         if (objectTextarea) objectTextarea.classList.add('hidden');
         if (objectInput) {
           objectInput.classList.remove('hidden');
-          // Transfer value if switching
-          if (objectTextarea && objectTextarea.value) {
-            objectInput.value = objectTextarea.value;
-            this.fieldValues.object = objectTextarea.value;
-          }
+          objectInput.value = valueToUse;
         }
       }
       
@@ -1639,7 +1782,6 @@ class QuadFormWC extends HTMLElement {
       const isQNameOrUri = newType === 'qname' || newType === 'uri';
       
       if (isQNameOrUri) {
-        // Behave like Subject/Predicate
         if (languageInput) {
           languageInput.disabled = true;
           languageInput.value = '';
@@ -1647,7 +1789,6 @@ class QuadFormWC extends HTMLElement {
         this.objectDatatype = '';
         this.objectLanguage = '';
       } else {
-        // It's a literal type
         if (!shouldUseTextarea && languageInput) {
           languageInput.disabled = true;
         }
@@ -1661,7 +1802,6 @@ class QuadFormWC extends HTMLElement {
   }
 
   handleControlToggle(e) {
-    // Get the button element (not a child element that might have been clicked)
     const button = e.target.closest('.control-toggle');
     if (!button) return;
     
@@ -1687,22 +1827,6 @@ class QuadFormWC extends HTMLElement {
         select.classList.remove('hidden');
       }
     }
-    
-    this.validate();
-  }
-  
-  handleFieldChange(e) {
-    const field = e.target.dataset.field;
-    const value = e.target.value;
-    
-    this.fieldValues[field] = value;
-    
-    // Emit field-changed event
-    this.dispatchEvent(new CustomEvent('field-changed', {
-      detail: { field, value },
-      bubbles: true,
-      composed: true
-    }));
     
     this.validate();
   }
@@ -1740,20 +1864,33 @@ class QuadFormWC extends HTMLElement {
   }
   
   validate() {
+    const container = this.shadowRoot.querySelector('.quad-form-container');
+    const mode = container?.dataset.mode || 'full';
     const errors = [];
     
-    if (!this.fieldValues.subject) errors.push('Subject is required');
-    if (!this.fieldValues.predicate) errors.push('Predicate is required');
-    if (!this.fieldValues.object) errors.push('Object is required');
-    if (!this.fieldValues.graph) errors.push('Graph is required');
+    if (mode === 'nano') {
+      // Only validate object in nano mode
+      if (!this.fieldValues.object) errors.push('Object is required');
+    } else if (mode === 'tiny') {
+      // Skip graph validation in tiny mode
+      if (!this.fieldValues.subject) errors.push('Subject is required');
+      if (!this.fieldValues.predicate) errors.push('Predicate is required');
+      if (!this.fieldValues.object) errors.push('Object is required');
+    } else {
+      // Full validation in full mode
+      if (!this.fieldValues.subject) errors.push('Subject is required');
+      if (!this.fieldValues.predicate) errors.push('Predicate is required');
+      if (!this.fieldValues.object) errors.push('Object is required');
+      if (!this.fieldValues.graph) errors.push('Graph is required');
+    }
     
     const valid = errors.length === 0;
     
-    // Update submit button
+    // Update submit buttons
     const submitBtn = this.shadowRoot.getElementById('submit-btn');
-    if (submitBtn) {
-      submitBtn.disabled = !valid;
-    }
+    const submitBtnTiny = this.shadowRoot.getElementById('submit-btn-tiny');
+    if (submitBtn) submitBtn.disabled = !valid;
+    if (submitBtnTiny) submitBtnTiny.disabled = !valid;
     
     // Emit validation event
     this.dispatchEvent(new CustomEvent('validation-changed', {
@@ -1768,17 +1905,31 @@ class QuadFormWC extends HTMLElement {
   async handleSubmit(e) {
     e.preventDefault();
     
-    if (!this.validate()) {
-      return;
-    }
+    const container = this.shadowRoot.querySelector('.quad-form-container');
+    const mode = container?.dataset.mode || 'full';
     
-    // Check if we need to generate SNIP
-    const objectValue = this.fieldValues.object;
-    if (this.objectUsesTextarea && objectValue && objectValue.length > 50) {
-      console.log('SNIP should be generated for long text:', {
-        length: objectValue.length,
-        preview: objectValue.substring(0, 50) + '...'
-      });
+    // For nano mode, use default values for missing fields
+    if (mode === 'nano') {
+      if (!this.fieldValues.object || this.fieldValues.object.trim() === '') {
+        return;
+      }
+      
+      // Set defaults if not present
+      if (!this.fieldValues.subject) this.fieldValues.subject = 'ex:DefaultSubject';
+      if (!this.fieldValues.predicate) this.fieldValues.predicate = 'rdfs:comment';
+      if (!this.fieldValues.graph) this.fieldValues.graph = this._defaultGraph;
+    } else if (mode === 'tiny') {
+      // For tiny mode, use default graph if not present
+      if (!this.fieldValues.graph) this.fieldValues.graph = this._defaultGraph;
+      
+      if (!this.validate()) {
+        return;
+      }
+    } else {
+      // Full mode - normal validation
+      if (!this.validate()) {
+        return;
+      }
     }
     
     // Build quad in FLAT format
@@ -1822,69 +1973,69 @@ class QuadFormWC extends HTMLElement {
         }));
       }
     } else {
-      // Clear form after event emission
-      this.clear();
+      // Clear form after event emission (except in nano mode)
+      if (mode !== 'nano') {
+        this.clear();
+      }
     }
   }
 
   expandQName(value) {
-    console.log('🔍 expandQName called with:', value);
-    
     if (!value || value.includes('://')) {
-      console.log('  → Early return (empty or has ://)');
       return value;
     }
     
     const colonIndex = value.indexOf(':');
     if (colonIndex === -1) {
-      console.log('  → Early return (no colon)');
       return value;
     }
     
     const prefix = value.substring(0, colonIndex);
-    console.log('  → Extracted prefix:', prefix);
-    console.log('  → MMM_URN_SCHEMES:', MMM_URN_SCHEMES);
-    console.log('  → STANDARD_SCHEMES:', STANDARD_SCHEMES);
-    console.log('  → Is MMM URN?', MMM_URN_SCHEMES.has(prefix));
-    console.log('  → Is Standard URN?', STANDARD_SCHEMES.has(prefix));
     
     // CRITICAL: MMM URN schemes are complete identifiers, not CURIEs!
-    // They should NEVER be expanded
     if (MMM_URN_SCHEMES.has(prefix) || STANDARD_SCHEMES.has(prefix)) {
-      console.log('  → Returning unchanged (URN scheme)');
       return value;
     }
     
     const localPart = value.substring(colonIndex + 1);
-    console.log('  → localPart:', localPart);
-    console.log('  → Has prefix in _prefixes?', !!this._prefixes[prefix]);
     
     if (this._prefixes[prefix]) {
-      const expanded = this._prefixes[prefix] + localPart;
-      console.log('  → Expanding to:', expanded);
-      return expanded;
+      return this._prefixes[prefix] + localPart;
     }
     
-    console.log('  → Returning unchanged (no matching prefix)');
+    return value;
+  }
+  
+  contractUri(value) {
+    // Try to contract a full URI to a CURIE
+    for (const [prefix, expansion] of Object.entries(this._prefixes)) {
+      if (value.startsWith(expansion)) {
+        return prefix + ':' + value.substring(expansion.length);
+      }
+    }
     return value;
   }
   
   updateAttribution() {
-    const atValue = this.shadowRoot.getElementById('at-value');
-    const byValue = this.shadowRoot.getElementById('by-value');
+    const atValue = this.shadowRoot?.getElementById('at-value');
+    const byValue = this.shadowRoot?.getElementById('by-value');
     
     if (atValue) {
-      const now = new Date().toISOString();
-      atValue.textContent = now;
-      
-      // Update every second
-      setInterval(() => {
-        atValue.textContent = new Date().toISOString();
-      }, 1000);
+      atValue.textContent = new Date().toISOString();
     }
     
     if (byValue) {
       byValue.textContent = this._currentIdentity || 'not logged in';
+    }
+    
+    // Update every second
+    if (!this._attributionInterval) {
+      this._attributionInterval = setInterval(() => {
+        const atValue = this.shadowRoot?.getElementById('at-value');
+        if (atValue) {
+          atValue.textContent = new Date().toISOString();
+        }
+      }, 1000);
     }
   }
   
@@ -1893,12 +2044,10 @@ class QuadFormWC extends HTMLElement {
     if (overlay) {
       overlay.classList.add('visible');
       
-      // Load prefixes-form on first show, or refresh if already loaded
       if (!this._prefixesFormLoaded) {
         this.loadPrefixesForm();
         this._prefixesFormLoaded = true;
       } else {
-        // If already loaded, just sync the current prefixes
         this.syncPrefixesForm();
       }
     }
@@ -1930,7 +2079,6 @@ class QuadFormWC extends HTMLElement {
     }
     
     if (name === 'graph') {
-      // Update graph path input
       const prefix = this.getGraphPrefix();
       if (value.startsWith(prefix)) {
         const path = value.substring(prefix.length);
@@ -1958,6 +2106,9 @@ class QuadFormWC extends HTMLElement {
   }
   
   clear() {
+    const container = this.shadowRoot.querySelector('.quad-form-container');
+    const mode = container?.dataset.mode || 'full';
+    
     this.fieldValues = {
       subject: '',
       predicate: '',
@@ -1965,7 +2116,6 @@ class QuadFormWC extends HTMLElement {
       graph: this._defaultGraph
     };
     
-    // Reset to default types
     this.fieldTypes = {
       subject: 'uri',
       predicate: 'qname',
@@ -1977,56 +2127,54 @@ class QuadFormWC extends HTMLElement {
     this.objectLanguage = '';
     this.objectUsesTextarea = false;
     
-    if (this.tinyMode) {
-      // Just clear tiny inputs
-      ['subject', 'predicate', 'object'].forEach(field => {
-        const input = this.shadowRoot.getElementById(`tiny-${field}`);
-        if (input) {
-          input.value = '';
-          input.style.backgroundColor = '';
-        }
-      });
-      const langInput = this.shadowRoot.getElementById('tiny-lang');
-      if (langInput) langInput.value = '';
-    } else {
-      // Clear full form inputs
-      this.shadowRoot.querySelectorAll('.field-input').forEach(input => {
+    // Clear ALL inputs (they all exist in unified DOM)
+    ['subject', 'predicate', 'object'].forEach(field => {
+      const input = this.shadowRoot.getElementById(`${field}-input`);
+      if (input) {
         input.value = '';
         input.style.backgroundColor = '';
-      });
+      }
       
-      this.shadowRoot.querySelectorAll('.field-select').forEach(select => {
+      const select = this.shadowRoot.getElementById(`${field}-select`);
+      if (select) {
         select.value = '';
-      });
-      
-      const textarea = this.shadowRoot.getElementById('object-textarea');
-      if (textarea) {
-        textarea.value = '';
-        textarea.style.backgroundColor = '';
       }
-      
-      const graphPathInput = this.shadowRoot.getElementById('graph-path-input');
-      if (graphPathInput) {
-        graphPathInput.value = this.graphPath;
-        graphPathInput.style.backgroundColor = '';
+    });
+    
+    const textarea = this.shadowRoot.getElementById('object-textarea');
+    if (textarea) {
+      textarea.value = '';
+      textarea.style.backgroundColor = '';
+    }
+    
+    const graphPathInput = this.shadowRoot.getElementById('graph-path-input');
+    if (graphPathInput) {
+      graphPathInput.value = this.graphPath;
+      graphPathInput.style.backgroundColor = '';
+    }
+    
+    // Reset type dropdowns
+    this.shadowRoot.querySelectorAll('.type-select-dropdown[data-field]').forEach(select => {
+      const field = select.dataset.field;
+      if (field) {
+        select.value = this.fieldTypes[field];
       }
-      
-      // Reset type dropdowns
-      this.shadowRoot.querySelectorAll('.type-select-dropdown').forEach(select => {
-        const field = select.dataset.field;
-        if (field) {
-          select.value = this.fieldTypes[field];
-        }
-      });
-      
-      const languageInput = this.shadowRoot.getElementById('language-input');
-      if (languageInput) {
-        languageInput.value = '';
-        languageInput.disabled = true;
-      }
+    });
+    
+    const languageInput = this.shadowRoot.getElementById('language-input');
+    if (languageInput) {
+      languageInput.value = '';
+      languageInput.disabled = true;
     }
     
     this.validate();
+  }
+  
+  disconnectedCallback() {
+    if (this._attributionInterval) {
+      clearInterval(this._attributionInterval);
+      this._attributionInterval = null;
+    }
   }
 }
 
