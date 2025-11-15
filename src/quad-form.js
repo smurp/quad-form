@@ -579,15 +579,29 @@ class QuadFormWC extends HTMLElement {
           align-items: center;
           margin-bottom: 0;
         }
+
+        /* Tiny mode field inputs - but NOT object input since it switches with textarea */
+        [data-mode="tiny"] .field-input:not(#object-input) {
+          display: inline-block !important;  /* Force visible for subject/predicate */
+          border: none;
+          border-bottom: 2px solid #ddd;
+          border-radius: 0;
+          padding: 4px 8px;
+          font-size: 14px;
+          width: auto;
+          max-width: none;
+        }
         
-        [data-mode="tiny"] .field-input {
+        /* Object input in tiny mode - respect .hidden class for input/textarea switching */
+        [data-mode="tiny"] #object-input:not(.hidden) {
           display: inline-block;
           border: none;
           border-bottom: 2px solid #ddd;
           border-radius: 0;
-          min-width: 16ch;
           padding: 4px 8px;
           font-size: 14px;
+          width: auto;
+          max-width: none;
         }
         
         [data-mode="tiny"] .tiny-decorator,
