@@ -2011,21 +2011,7 @@ class QuadFormWC extends HTMLElement {
     if (this._mmmServer) {
       try {
         await this._mmmServer.addQuad(quad);
-        
-        // In nano mode, clear only object and refocus
-        if (mode === 'nano') {
-          this.fieldValues.object = '';
-          const objectInput = this.shadowRoot.getElementById('object-input');
-          const objectTextarea = this.shadowRoot.getElementById('object-textarea');
-          const activeInput = objectTextarea && !objectTextarea.classList.contains('hidden') ? 
-                             objectTextarea : objectInput;
-          if (activeInput) {
-            activeInput.value = '';
-            activeInput.focus();
-          }
-        } else {
-          this.clear();
-        }
+        // Never auto-clear - user can manually use Clear button if desired
       } catch (err) {
         console.error('Failed to submit quad:', err);
         this.dispatchEvent(new CustomEvent('quad-error', {
@@ -2034,24 +2020,10 @@ class QuadFormWC extends HTMLElement {
           composed: true
         }));
       }
-    } else {
-      // No mmmServer - just clear form after event emission
-      if (mode === 'nano') {
-        // In nano mode, clear only object and refocus
-        this.fieldValues.object = '';
-        const objectInput = this.shadowRoot.getElementById('object-input');
-        const objectTextarea = this.shadowRoot.getElementById('object-textarea');
-        const activeInput = objectTextarea && !objectTextarea.classList.contains('hidden') ? 
-                           objectTextarea : objectInput;
-        if (activeInput) {
-          activeInput.value = '';
-          activeInput.focus();
-        }
-      } else if (mode !== 'nano') {
-        this.clear();
-      }
     }
+    // Form stays populated after submit - use Clear button to clear manually
   }
+
 
   expandQName(value) {
     if (!value || value.includes('://')) {
