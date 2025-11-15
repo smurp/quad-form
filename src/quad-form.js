@@ -7,6 +7,12 @@
  * - CSS controls visibility via data-mode attribute
  * - No renderContent() calls after initial render()
  * - Event listeners attached once
+ * 
+ * NANO MODE FEATURES:
+ * - Only object input visible
+ * - Tab or Blur triggers submit
+ * - Auto-clear and refocus after submit
+ * - One-way transition (cannot return to form)
  */
 
 // XSD to HTML5 input type mapping
@@ -388,6 +394,11 @@ class QuadFormWC extends HTMLElement {
       this.tinyMode = false;
       container.setAttribute('data-mode', 'nano');
       
+      // Set default values for hidden fields if not already set
+      if (!this.fieldValues.subject) this.fieldValues.subject = 'ex:DefaultSubject';
+      if (!this.fieldValues.predicate) this.fieldValues.predicate = 'rdfs:comment';
+      if (!this.fieldValues.graph) this.fieldValues.graph = this._defaultGraph;
+      
       setTimeout(() => {
         const objectInput = this.shadowRoot.getElementById('object-input');
         const objectTextarea = this.shadowRoot.getElementById('object-textarea');
@@ -544,6 +555,7 @@ class QuadFormWC extends HTMLElement {
         [data-mode="tiny"] .graph-field,
         [data-mode="tiny"] .submit-btn,
         [data-mode="tiny"] .tiny-btn,
+        [data-mode="tiny"] .nano-btn,
         [data-mode="tiny"] .field-select {
           display: none;
         }
@@ -793,7 +805,6 @@ class QuadFormWC extends HTMLElement {
           padding: 8px;
           font-family: monospace;
           font-size: 13px;
-          min-width: 16ch;
         }
         
         .graph-path-input:focus {
@@ -843,7 +854,7 @@ class QuadFormWC extends HTMLElement {
           border-top: 2px solid #e0e0e0;
         }
         
-        .submit-btn, .submit-btn-tiny, .clear-btn, .tiny-btn, .form-btn {
+        .submit-btn, .submit-btn-tiny, .clear-btn, .tiny-btn, .form-btn, .nano-btn {
           padding: 10px 20px;
           border: none;
           border-radius: 3px;
@@ -898,6 +909,15 @@ class QuadFormWC extends HTMLElement {
         
         .tiny-btn:hover, .form-btn:hover {
           background: #1976D2;
+        }
+        
+        .nano-btn {
+          background: #FF9800;
+          color: white;
+        }
+        
+        .nano-btn:hover {
+          background: #F57C00;
         }
         
         .clear-btn {
@@ -1126,6 +1146,7 @@ class QuadFormWC extends HTMLElement {
         <div class="form-actions">
           <button type="button" class="tiny-btn" id="tiny-btn">Tiny</button>
           <button type="button" class="form-btn" id="form-btn">Form</button>
+          <button type="button" class="nano-btn" id="nano-btn">Nano</button>
           <button type="button" class="clear-btn" id="clear-btn">Clear</button>
           <button type="submit" class="submit-btn" id="submit-btn">Submit Quad</button>
           <button type="button" class="submit-btn-tiny" id="submit-btn-tiny">+</button>
@@ -1346,6 +1367,11 @@ class QuadFormWC extends HTMLElement {
       formBtn.addEventListener('click', () => this.toggleTinyMode());
     }
     
+    const nanoBtn = this.shadowRoot.getElementById('nano-btn');
+    if (nanoBtn) {
+      nanoBtn.addEventListener('click', () => this.toggleNanoMode());
+    }
+    
     // Submit buttons (both regular and tiny)
     const submitBtn = this.shadowRoot.getElementById('submit-btn');
     if (submitBtn) {
@@ -1413,10 +1439,14 @@ class QuadFormWC extends HTMLElement {
           
           if (mode === 'tiny') {
             this.handleTinyKeydown(e, field);
+          } else if (mode === 'nano' && field === 'object' && e.key === 'Tab') {
+            // NANO MODE: Tab key triggers submit
+            e.preventDefault();
+            this.handleSubmit(e);
           }
         });
         
-        // Nano mode - emit on blur
+        // Nano mode - blur triggers submit
         input.addEventListener('blur', (e) => {
           const container = this.shadowRoot.querySelector('.quad-form-container');
           const mode = container?.dataset.mode;
@@ -1467,6 +1497,10 @@ class QuadFormWC extends HTMLElement {
         
         if (mode === 'tiny') {
           this.handleTinyKeydown(e, 'object');
+        } else if (mode === 'nano' && e.key === 'Tab') {
+          // NANO MODE: Tab key triggers submit (even in textarea)
+          e.preventDefault();
+          this.handleSubmit(e);
         }
       });
       
@@ -1977,7 +2011,21 @@ class QuadFormWC extends HTMLElement {
     if (this._mmmServer) {
       try {
         await this._mmmServer.addQuad(quad);
-        this.clear();
+        
+        // In nano mode, clear only object and refocus
+        if (mode === 'nano') {
+          this.fieldValues.object = '';
+          const objectInput = this.shadowRoot.getElementById('object-input');
+          const objectTextarea = this.shadowRoot.getElementById('object-textarea');
+          const activeInput = objectTextarea && !objectTextarea.classList.contains('hidden') ? 
+                             objectTextarea : objectInput;
+          if (activeInput) {
+            activeInput.value = '';
+            activeInput.focus();
+          }
+        } else {
+          this.clear();
+        }
       } catch (err) {
         console.error('Failed to submit quad:', err);
         this.dispatchEvent(new CustomEvent('quad-error', {
@@ -1987,8 +2035,19 @@ class QuadFormWC extends HTMLElement {
         }));
       }
     } else {
-      // Clear form after event emission (except in nano mode)
-      if (mode !== 'nano') {
+      // No mmmServer - just clear form after event emission
+      if (mode === 'nano') {
+        // In nano mode, clear only object and refocus
+        this.fieldValues.object = '';
+        const objectInput = this.shadowRoot.getElementById('object-input');
+        const objectTextarea = this.shadowRoot.getElementById('object-textarea');
+        const activeInput = objectTextarea && !objectTextarea.classList.contains('hidden') ? 
+                           objectTextarea : objectInput;
+        if (activeInput) {
+          activeInput.value = '';
+          activeInput.focus();
+        }
+      } else if (mode !== 'nano') {
         this.clear();
       }
     }
