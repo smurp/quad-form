@@ -137,8 +137,8 @@ class QuadFormWC extends HTMLElement {
     };
     
     // Object metadata
-    this.objectDatatype = '';
-    this.objectLanguage = '';
+    this._objectDatatype = '';
+    this._objectLanguage = '';
     this.objectUsesTextarea = false;
     
     // Graph mental space tracking
@@ -166,6 +166,32 @@ class QuadFormWC extends HTMLElement {
     this._currentIdentity = null;
     this._expandQNames = true;
     this._defaultGraph = 'mntl:publ/scratch';
+  }
+
+  // Getters/setters for objectDatatype and objectLanguage
+  // These trigger updateObjectInputType() when datatype changes
+  get objectDatatype() {
+    return this._objectDatatype;
+  }
+
+  set objectDatatype(value) {
+    if (this._objectDatatype !== value) {
+      this._objectDatatype = value;
+      // Trigger input type update when datatype changes
+      if (this.shadowRoot) {
+        this.updateObjectInputType();
+      }
+    }
+  }
+
+  get objectLanguage() {
+    return this._objectLanguage;
+  }
+
+  set objectLanguage(value) {
+    if (this._objectLanguage !== value) {
+      this._objectLanguage = value;
+    }
   }
   
   connectedCallback() {
@@ -2023,8 +2049,7 @@ class QuadFormWC extends HTMLElement {
     }
     // Form stays populated after submit - use Clear button to clear manually
   }
-
-
+  
   expandQName(value) {
     if (!value || value.includes('://')) {
       return value;
