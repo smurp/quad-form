@@ -46,7 +46,7 @@
     "terser": "^5.19.0"
   },
   "dependencies": {
-    "@mmmlib/prefixes-form": "github:smurp/prefixes-form#main"
+    "@mmmlib/prefixes-form": "workspace:*"
   },
   "exports": {
     ".": {
