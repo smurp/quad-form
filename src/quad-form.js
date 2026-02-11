@@ -61,16 +61,20 @@ const COMMON_PROPERTIES = [
 
 // Mental space types with their templates
 const MENTAL_SPACE_TYPES = [
-  { value: 'mntl:lock', label: 'mntl:lock/{identity}', disabled: true,
-    description: 'mntl:lock - Owned by you, for you alone' },
-  { value: 'mntl:hold', label: 'mntl:hold/{identity}', disabled: true,
-    description: 'mntl:hold - Owned by you, with detailed capabilities' },
-  { value: 'mntl:gate', label: 'mntl:gate/{identity}', disabled: true,
-    description: 'mntl:gate - Owned by you, readable and writeable by whom you choose' },
+  { value: 'mntl:whim', label: 'mntl:whim/{identity}', disabled: true,
+    description: 'mntl:whim - Ephemeral scratch space (transient)' },
+  { value: 'mntl:priv', label: 'mntl:priv/{identity}', disabled: true,
+    description: 'mntl:priv - Private, identity-verified' },
+  { value: 'mntl:capa', label: 'mntl:capa/{identity}', disabled: true,
+    description: 'mntl:capa - Capability-based, encrypted at rest' },
+  { value: 'mntl:rbac', label: 'mntl:rbac/{identity}', disabled: true,
+    description: 'mntl:rbac - Role-based access control' },
   { value: 'mntl:open', label: 'mntl:open/{identity}', disabled: false,
     description: 'mntl:open - Owned by you, readable by the world' },
   { value: 'mntl:publ', label: 'mntl:publ', disabled: false,
-    description: 'mntl:publ - A true public commons' }
+    description: 'mntl:publ - A true public commons' },
+  { value: 'mntl:syst', label: 'mntl:syst', disabled: true,
+    description: 'mntl:syst - System infrastructure (immutable)' }
 ];
 
 /**

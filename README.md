@@ -169,9 +169,13 @@ All events bubble and are composed (cross shadow DOM boundaries).
 The graph field supports the full mntl: hierarchy:
 
 ```
-mntl:lock/{identity}/  - Personal encrypted vault
+mntl:whim/{identity}/  - Ephemeral/scratch (never persisted)
+mntl:priv/{identity}/  - Private, identity-verified
+mntl:capa/{identity}/  - Capability-based, encrypted
+mntl:rbac/{identity}/  - Role-based access control
 mntl:open/{identity}/  - Public read, signed writes
 mntl:publ/            - Public commons
+mntl:syst/            - System infrastructure
 ```
 
 ## Browser Compatibility
