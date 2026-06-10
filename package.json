@@ -1,5 +1,5 @@
 {
-  "name": "@mmmlib/quad-form",
+  "name": "@mmmttoys/quad-form",
   "version": "0.4.0",
   "description": "A web component for creating RDF quads with CURIE support and XSD datatypes",
   "main": "dist/quad-form.js",
@@ -46,7 +46,7 @@
     "terser": "^5.19.0"
   },
   "dependencies": {
-    "@mmmlib/prefixes-form": "workspace:*"
+    "@mmmttoys/prefixes-form": "workspace:*"
   },
   "exports": {
     ".": {
