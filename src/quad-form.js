@@ -203,6 +203,17 @@ class QuadFormWC extends HTMLElement {
     this.attachEventListeners();
     this.updateAttribution();
     this.loadPrefixesForm();
+    // start-in-tiny: honor tinyMode set before mount (the say-line
+    // pins TINY) — sync the derived state toggleTinyMode would have
+    if (this.tinyMode) {
+      this.tinyFieldTypes = {
+        subject: this.fieldTypes.subject === 'uri' ? 'uri' : 'qname',
+        predicate: this.fieldTypes.predicate === 'uri' ? 'uri' : 'qname',
+        object: this.getObjectTinyType()
+      };
+      this.updateTinyDecorators();
+      this.validate();
+    }
   }
   
   // Getters/setters
@@ -865,6 +876,75 @@ class QuadFormWC extends HTMLElement {
           font-size: 18px;
           margin-left: 4px;
         }
+
+        /* period-submit: the tiny period IS the submit control —
+           faint while the sentence is incomplete, dark and clickable
+           once every field validates. The period is the moment of
+           consent: nothing is asserted without ending the sentence.
+           The whole action row goes: the period is the ONLY button
+           (no mode roaming — each mode has a place). */
+        :host([period-submit]) [data-mode="tiny"] .form-actions {
+          display: none;
+        }
+        :host([period-submit]) [data-mode="tiny"] .tiny-period {
+          opacity: 0.25;
+          cursor: default;
+          padding: 1px 8px;
+          border-radius: 4px;
+          transition: opacity 0.2s, background-color 0.2s, color 0.2s;
+        }
+        /* ready = a submit-blue BUTTON around the period: the moment
+           of consent should look like one */
+        :host([period-submit]) [data-mode="tiny"] .tiny-period.ready {
+          opacity: 1;
+          cursor: pointer;
+          color: #fff;
+          background: var(--quad-form-submit-blue, #2196F3);
+        }
+        /* hide-graph: suppress the mental-space widget in EVERY mode
+           — the host asserts into the space IT is pointed at */
+        :host([hide-graph]) .graph-field {
+          display: none !important;
+        }
+        /* compact: the whole sentence on ONE line — the container
+           chrome drops (the host supplies the card), the inputs flex
+           and ellipsize. The say-line's mini-face geometry. */
+        :host([compact]) .quad-form-container[data-mode="tiny"] {
+          padding: 2px 4px;
+          border: none;
+          background: transparent;
+        }
+        :host([compact]) [data-mode="tiny"] .unified-content {
+          flex-wrap: nowrap;
+          gap: 3px;
+          align-items: center;
+        }
+        :host([compact]) [data-mode="tiny"] .field-group {
+          min-width: 0;
+          flex: 1 1 0;
+        }
+        :host([compact]) [data-mode="tiny"] .field-input:not(#object-input),
+        :host([compact]) [data-mode="tiny"] #object-input:not(.hidden),
+        :host([compact]) [data-mode="tiny"] #object-textarea:not(.hidden) {
+          min-width: 0;
+          width: 100%;
+          box-sizing: border-box;
+          padding: 3px 2px;
+          font-size: 12px;
+          text-overflow: ellipsis;
+        }
+        :host([compact]) [data-mode="tiny"] #object-textarea:not(.hidden) {
+          min-height: 1.7em;
+          height: 1.7em;
+        }
+
+        /* presumption pattern: a provisional DWIM prefill renders
+           tentative (italic, muted) until the user touches it or
+           accepts it by ending the sentence */
+        .field-input.presumed, .field-select.presumed {
+          font-style: italic;
+          color: #8a7a4a;
+        }
         
         .tiny-lang {
           border: none;
@@ -1418,6 +1498,17 @@ class QuadFormWC extends HTMLElement {
     if (clearBtn) {
       clearBtn.addEventListener('click', () => this.clear());
     }
+
+    // period-submit: ending the sentence asserts it
+    const period = this.shadowRoot.querySelector('.tiny-period');
+    if (period) {
+      period.addEventListener('click', (e) => {
+        if (this.hasAttribute('period-submit') &&
+            period.classList.contains('ready')) {
+          this.handleSubmit(e);
+        }
+      });
+    }
     
     // Type select dropdowns (except graph mental space)
     this.shadowRoot.querySelectorAll('.type-select-dropdown[data-field]').forEach(select => {
@@ -1449,6 +1540,8 @@ class QuadFormWC extends HTMLElement {
       const input = this.shadowRoot.getElementById(`${field}-input`);
       if (input) {
         input.addEventListener('input', (e) => {
+          // touching a presumed prefill makes it definite
+          this._clearPresumed(field);
           this.fieldValues[field] = e.target.value;
           this.updateFieldValidation();
           
@@ -1491,6 +1584,8 @@ class QuadFormWC extends HTMLElement {
       const select = this.shadowRoot.getElementById(`${field}-select`);
       if (select) {
         select.addEventListener('change', (e) => {
+          // touching a presumed prefill makes it definite
+          this._clearPresumed(field);
           this.fieldValues[field] = e.target.value;
           this.updateFieldValidation();
           
@@ -1509,6 +1604,8 @@ class QuadFormWC extends HTMLElement {
     const objectTextarea = this.shadowRoot.getElementById('object-textarea');
     if (objectTextarea) {
       objectTextarea.addEventListener('input', (e) => {
+        // touching a presumed prefill makes it definite
+        this._clearPresumed('object');
         this.fieldValues.object = e.target.value;
         this.updateFieldValidation();
         
@@ -1963,12 +2060,18 @@ class QuadFormWC extends HTMLElement {
     }
     
     const valid = errors.length === 0;
-    
+
     // Update submit buttons
     const submitBtn = this.shadowRoot.getElementById('submit-btn');
     const submitBtnTiny = this.shadowRoot.getElementById('submit-btn-tiny');
     if (submitBtn) submitBtn.disabled = !valid;
     if (submitBtnTiny) submitBtnTiny.disabled = !valid;
+
+    // period-submit: reflect validity on the period control
+    if (this.hasAttribute('period-submit')) {
+      const period = this.shadowRoot.querySelector('.tiny-period');
+      if (period) period.classList.toggle('ready', valid);
+    }
     
     // Emit validation event
     this.dispatchEvent(new CustomEvent('validation-changed', {
@@ -2135,21 +2238,33 @@ class QuadFormWC extends HTMLElement {
   }
   
   // Public API
-  setField(name, value) {
+  //
+  // options.presumed: the presumption pattern — a DWIM prefill that
+  // renders tentative (italic, muted) until the user touches the
+  // field (input/change makes it definite) or accepts it by
+  // submitting. Callers can ask isPresumed(name) to distinguish.
+  setField(name, value, { presumed = false } = {}) {
     this.fieldValues[name] = value;
-    
+
     const input = this.shadowRoot.getElementById(`${name}-input`);
     const select = this.shadowRoot.getElementById(`${name}-select`);
     const textarea = this.shadowRoot.getElementById(`${name}-textarea`);
-    
-    if (this.fieldControls[name] === 'input' && input) {
+
+    // TINY shows the INPUT for every field regardless of
+    // fieldControls (the CSS forces it) — write where the user looks
+    if ((this.tinyMode || this.fieldControls[name] === 'input') && input) {
       input.value = value;
-    } else if (this.fieldControls[name] === 'select' && select) {
+    }
+    if (this.fieldControls[name] === 'select' && select) {
       select.value = value;
     }
-    
+
     if (name === 'object' && textarea) {
       textarea.value = value;
+    }
+
+    for (const el of [input, select, textarea]) {
+      if (el) el.classList.toggle('presumed', presumed);
     }
     
     if (name === 'graph') {
@@ -2169,6 +2284,23 @@ class QuadFormWC extends HTMLElement {
   
   getField(name) {
     return this.fieldValues[name] || '';
+  }
+
+  /** A touched presumption becomes definite on EVERY control of the
+   * field (setField marks input, select, and textarea alike). */
+  _clearPresumed(field) {
+    for (const suffix of ['input', 'select', 'textarea']) {
+      this.shadowRoot.getElementById(`${field}-${suffix}`)
+        ?.classList.remove('presumed');
+    }
+  }
+
+  /** Is the field's current value a still-untouched presumption? */
+  isPresumed(name) {
+    const input = this.shadowRoot.getElementById(`${name}-input`);
+    const select = this.shadowRoot.getElementById(`${name}-select`);
+    return !!(input?.classList.contains('presumed') ||
+              select?.classList.contains('presumed'));
   }
   
   populateFromEntity(entity, role, mode) {
