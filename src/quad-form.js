@@ -171,6 +171,36 @@ class QuadFormWC extends HTMLElement {
     this._expandQNames = true;
     this._defaultGraph = 'mntl:publ/scratch';
     this._predicateOptions = null;   // host-supplied picker values
+    this._subjectOptions = null;     // {value, label} pairs
+    this._objectOptions = null;
+  }
+
+  /** Normalize host-supplied options: strings or {value, label}. */
+  static _normalizeOptions(list) {
+    if (!Array.isArray(list) || !list.length) return null;
+    return list.map((o) => (typeof o === 'string')
+      ? { value: o, label: o }
+      : { value: o.value, label: o.label ?? o.value });
+  }
+
+  static _escOpt(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  _setFieldOptions(field, list) {
+    const norm = QuadFormWC._normalizeOptions(list);
+    this[`_${field}Options`] = norm;
+    const select = this.shadowRoot?.getElementById(`${field}-select`);
+    if (select) {
+      const current = this.fieldValues[field];
+      const cap = field.charAt(0).toUpperCase() + field.slice(1);
+      select.innerHTML = `<option value="">Select ${cap}...</option>` +
+        (norm ?? []).map((o) =>
+          `<option value="${QuadFormWC._escOpt(o.value)}">` +
+          `${QuadFormWC._escOpt(o.label)}</option>`).join('');
+      if (current) select.value = current;
+    }
   }
 
   /**
@@ -178,23 +208,49 @@ class QuadFormWC extends HTMLElement {
    * vocabulary source (e.g. NooViz's engaged-ontologies VocabularyKb);
    * unset, the hardcoded COMMON_PROPERTIES stand. Setting re-renders
    * the live select, preserving the current value when possible.
-   * @param {string[]|null} list - CURIEs/URIs, or null to reset
+   * @param {Array<string|{value,label}>|null} list
    */
   set predicateOptions(list) {
-    this._predicateOptions =
-      (Array.isArray(list) && list.length) ? [...list] : null;
-    const select = this.shadowRoot?.getElementById('predicate-select');
-    if (select) {
-      const current = this.fieldValues.predicate;
-      select.innerHTML = '<option value="">Select Predicate...</option>' +
-        this.predicateOptions.map((p) =>
-          `<option value="${p}">${p}</option>`).join('');
-      if (current) select.value = current;
-    }
+    this._setFieldOptions('predicate', list);
   }
 
   get predicateOptions() {
-    return this._predicateOptions ?? COMMON_PROPERTIES;
+    return this._predicateOptions ??
+      COMMON_PROPERTIES.map((p) => ({ value: p, label: p }));
+  }
+
+  /** Subject/object candidate entities — {value, label} pairs (a
+   * literal leaf rides as its snip: value with its human-readable
+   * label). Feeds the pickers AND Tab-completion in input mode. */
+  set subjectOptions(list) { this._setFieldOptions('subject', list); }
+  get subjectOptions() { return this._subjectOptions ?? []; }
+  set objectOptions(list) { this._setFieldOptions('object', list); }
+  get objectOptions() { return this._objectOptions ?? []; }
+
+  /**
+   * TAB completion for entity fields: if the typed text prefixes a
+   * candidate's label or value (case-insensitive), complete to the
+   * candidate's VALUE. @returns {boolean} whether one applied
+   */
+  _tryComplete(field, input) {
+    const text = (input.value ?? '').trim();
+    if (!text) return false;
+    const opts = field === 'subject' ? this.subjectOptions
+      : field === 'object' ? this.objectOptions : [];
+    const low = text.toLowerCase();
+    const hit = opts.find((o) =>
+      o.value.toLowerCase().startsWith(low) ||
+      (o.label ?? '').toLowerCase().startsWith(low));
+    if (!hit || hit.value === text) return false;
+    input.value = hit.value;
+    this.fieldValues[field] = hit.value;
+    this.updateFieldValidation();
+    this.dispatchEvent(new CustomEvent('field-changed', {
+      detail: { field, value: hit.value },
+      bubbles: true, composed: true,
+    }));
+    this.validate();
+    return true;
   }
 
   // Getters/setters for objectDatatype and objectLanguage
@@ -290,16 +346,11 @@ class QuadFormWC extends HTMLElement {
   
   getPickerValues(field) {
     if (field === 'predicate') {
-      return this.predicateOptions;
+      return this.predicateOptions.map((o) => o.value);
     }
-    
-    // For subject and object, return classes from prefixes
-    const classes = [];
-    for (const prefix in this._prefixes) {
-      classes.push(`${prefix}:Class`);
-      classes.push(`${prefix}:Resource`);
-    }
-    return classes;
+    if (field === 'subject') return this.subjectOptions.map((o) => o.value);
+    if (field === 'object') return this.objectOptions.map((o) => o.value);
+    return [];
   }
 
   /**
@@ -1396,12 +1447,12 @@ class QuadFormWC extends HTMLElement {
   }
   
   renderSelectOptions(fieldName) {
-    if (fieldName === 'predicate') {
-      return this.predicateOptions.map(prop =>
-        `<option value="${prop}">${prop}</option>`
-      ).join('');
-    }
-    return '';
+    const opts = fieldName === 'predicate' ? this.predicateOptions
+      : fieldName === 'subject' ? this.subjectOptions
+      : fieldName === 'object' ? this.objectOptions : [];
+    return opts.map((o) =>
+      `<option value="${QuadFormWC._escOpt(o.value)}">` +
+      `${QuadFormWC._escOpt(o.label)}</option>`).join('');
   }
   
   getPlaceholder(fieldName, fieldType) {
@@ -1596,13 +1647,18 @@ class QuadFormWC extends HTMLElement {
         input.addEventListener('keydown', (e) => {
           const container = this.shadowRoot.querySelector('.quad-form-container');
           const mode = container?.dataset.mode;
-          
+
           if (mode === 'tiny') {
             this.handleTinyKeydown(e, field);
           } else if (mode === 'nano' && field === 'object' && e.key === 'Tab') {
             // NANO MODE: Tab key triggers submit
             e.preventDefault();
             this.handleSubmit(e);
+          } else if (e.key === 'Tab' && !e.shiftKey &&
+                     (field === 'subject' || field === 'object') &&
+                     this._tryComplete(field, e.target)) {
+            // FULL mode: entity completion beats tab-out
+            e.preventDefault();
           }
         });
         
@@ -1718,10 +1774,16 @@ class QuadFormWC extends HTMLElement {
     // Check if we're in a textarea (for object field with markdown/string types)
     const isTextarea = e.target.tagName === 'TEXTAREA';
     
-    // Tab key - control tab order
+    // Tab key — entity COMPLETION first (subject/object with a
+    // matching candidate), then tab-order control
     if (e.key === 'Tab') {
+      if (!e.shiftKey && (field === 'subject' || field === 'object') &&
+          this._tryComplete(field, e.target)) {
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
-      
+
       if (e.shiftKey) {
         // Shift+Tab - go backwards
         if (field === 'subject') {
