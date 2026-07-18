@@ -170,6 +170,31 @@ class QuadFormWC extends HTMLElement {
     this._currentIdentity = null;
     this._expandQNames = true;
     this._defaultGraph = 'mntl:publ/scratch';
+    this._predicateOptions = null;   // host-supplied picker values
+  }
+
+  /**
+   * The predicate picker's values. Hosts feed these from their own
+   * vocabulary source (e.g. NooViz's engaged-ontologies VocabularyKb);
+   * unset, the hardcoded COMMON_PROPERTIES stand. Setting re-renders
+   * the live select, preserving the current value when possible.
+   * @param {string[]|null} list - CURIEs/URIs, or null to reset
+   */
+  set predicateOptions(list) {
+    this._predicateOptions =
+      (Array.isArray(list) && list.length) ? [...list] : null;
+    const select = this.shadowRoot?.getElementById('predicate-select');
+    if (select) {
+      const current = this.fieldValues.predicate;
+      select.innerHTML = '<option value="">Select Predicate...</option>' +
+        this.predicateOptions.map((p) =>
+          `<option value="${p}">${p}</option>`).join('');
+      if (current) select.value = current;
+    }
+  }
+
+  get predicateOptions() {
+    return this._predicateOptions ?? COMMON_PROPERTIES;
   }
 
   // Getters/setters for objectDatatype and objectLanguage
@@ -265,7 +290,7 @@ class QuadFormWC extends HTMLElement {
   
   getPickerValues(field) {
     if (field === 'predicate') {
-      return COMMON_PROPERTIES;
+      return this.predicateOptions;
     }
     
     // For subject and object, return classes from prefixes
@@ -877,29 +902,14 @@ class QuadFormWC extends HTMLElement {
           margin-left: 4px;
         }
 
-        /* period-submit: the tiny period IS the submit control —
-           faint while the sentence is incomplete, dark and clickable
-           once every field validates. The period is the moment of
-           consent: nothing is asserted without ending the sentence.
-           The whole action row goes: the period is the ONLY button
-           (no mode roaming — each mode has a place). */
-        :host([period-submit]) [data-mode="tiny"] .form-actions {
+        /* period-submit: the HOST manages submission chrome (its own
+           Submit button + programmatic handleSubmit; the say-line's
+           sits in its bar, visible in BOTH faces) — the internal
+           action row goes in EVERY mode, and the tiny period returns
+           to plain punctuation: the sentence still ends with "." but
+           the button lives with the host. */
+        :host([period-submit]) .form-actions {
           display: none;
-        }
-        :host([period-submit]) [data-mode="tiny"] .tiny-period {
-          opacity: 0.25;
-          cursor: default;
-          padding: 1px 8px;
-          border-radius: 4px;
-          transition: opacity 0.2s, background-color 0.2s, color 0.2s;
-        }
-        /* ready = a submit-blue BUTTON around the period: the moment
-           of consent should look like one */
-        :host([period-submit]) [data-mode="tiny"] .tiny-period.ready {
-          opacity: 1;
-          cursor: pointer;
-          color: #fff;
-          background: var(--quad-form-submit-blue, #2196F3);
         }
         /* hide-graph: suppress the mental-space widget in EVERY mode
            — the host asserts into the space IT is pointed at */
@@ -936,6 +946,43 @@ class QuadFormWC extends HTMLElement {
         :host([compact]) [data-mode="tiny"] #object-textarea:not(.hidden) {
           min-height: 1.7em;
           height: 1.7em;
+        }
+        /* compact FORM (the say-line's ▆ face): the configuration
+           view — label + control-toggle + type-select + the
+           auto-configured input/picker per field — chrome stripped
+           and geometry tightened to sit in a panel cell */
+        :host([compact]) .quad-form-container[data-mode="full"] {
+          padding: 2px 4px;
+          border: none;
+          background: transparent;
+        }
+        :host([compact]) [data-mode="full"] .form-header {
+          display: none;
+        }
+        :host([compact]) [data-mode="full"] .field-group {
+          margin-bottom: 6px;
+        }
+        :host([compact]) [data-mode="full"] .field-controls {
+          gap: 4px;
+          margin-bottom: 3px;
+        }
+        :host([compact]) [data-mode="full"] .field-label {
+          font-size: 11px;
+        }
+        :host([compact]) [data-mode="full"] .type-select-dropdown,
+        :host([compact]) [data-mode="full"] .control-toggle {
+          padding: 2px 4px;
+          font-size: 11px;
+        }
+        :host([compact]) [data-mode="full"] .field-input,
+        :host([compact]) [data-mode="full"] .field-select {
+          padding: 3px 4px;
+          font-size: 12px;
+          min-width: 0;
+        }
+        :host([compact]) [data-mode="full"] .field-textarea {
+          min-height: 40px;
+          font-size: 12px;
         }
 
         /* presumption pattern: a provisional DWIM prefill renders
@@ -1350,7 +1397,7 @@ class QuadFormWC extends HTMLElement {
   
   renderSelectOptions(fieldName) {
     if (fieldName === 'predicate') {
-      return COMMON_PROPERTIES.map(prop => 
+      return this.predicateOptions.map(prop =>
         `<option value="${prop}">${prop}</option>`
       ).join('');
     }
@@ -1499,16 +1546,6 @@ class QuadFormWC extends HTMLElement {
       clearBtn.addEventListener('click', () => this.clear());
     }
 
-    // period-submit: ending the sentence asserts it
-    const period = this.shadowRoot.querySelector('.tiny-period');
-    if (period) {
-      period.addEventListener('click', (e) => {
-        if (this.hasAttribute('period-submit') &&
-            period.classList.contains('ready')) {
-          this.handleSubmit(e);
-        }
-      });
-    }
     
     // Type select dropdowns (except graph mental space)
     this.shadowRoot.querySelectorAll('.type-select-dropdown[data-field]').forEach(select => {
@@ -1934,7 +1971,24 @@ class QuadFormWC extends HTMLElement {
                                 newType === 'mmmdt:markdown';
       
       this.objectUsesTextarea = shouldUseTextarea;
-      
+
+      const isQNameOrUri = newType === 'qname' || newType === 'uri';
+      const objectSelect = this.shadowRoot.getElementById('object-select');
+
+      // A LITERAL type needs a typed control — the entity picker is
+      // meaningless for it: flip the control to input (the toggle
+      // button follows) and dismiss the select. (The bug: picker +
+      // xsd:string left the picker redundantly visible beside the
+      // literal input.)
+      if (!isQNameOrUri && this.fieldControls.object === 'select') {
+        this.fieldControls.object = 'input';
+        const btn = this.shadowRoot
+          .querySelector('.control-toggle[data-field="object"]');
+        if (btn) btn.innerHTML = '<strong>input</strong>/picker';
+      }
+      const usePicker = isQNameOrUri && this.fieldControls.object === 'select';
+      if (objectSelect) objectSelect.classList.toggle('hidden', !usePicker);
+
       // Show/hide appropriate input and set the value
       if (shouldUseTextarea) {
         if (objectInput) objectInput.classList.add('hidden');
@@ -1945,6 +1999,9 @@ class QuadFormWC extends HTMLElement {
         if (languageInput) {
           languageInput.disabled = false;
         }
+      } else if (usePicker) {
+        if (objectTextarea) objectTextarea.classList.add('hidden');
+        if (objectInput) objectInput.classList.add('hidden');
       } else {
         if (objectTextarea) objectTextarea.classList.add('hidden');
         if (objectInput) {
@@ -1952,9 +2009,6 @@ class QuadFormWC extends HTMLElement {
           objectInput.value = valueToUse;
         }
       }
-      
-      // Handle QName/URI vs literal behavior
-      const isQNameOrUri = newType === 'qname' || newType === 'uri';
       
       if (isQNameOrUri) {
         if (languageInput) {
@@ -2056,7 +2110,11 @@ class QuadFormWC extends HTMLElement {
       if (!this.fieldValues.subject) errors.push('Subject is required');
       if (!this.fieldValues.predicate) errors.push('Predicate is required');
       if (!this.fieldValues.object) errors.push('Object is required');
-      if (!this.fieldValues.graph) errors.push('Graph is required');
+      // hide-graph: a hidden field cannot be required — the host
+      // supplies the graph itself
+      if (!this.hasAttribute('hide-graph') && !this.fieldValues.graph) {
+        errors.push('Graph is required');
+      }
     }
     
     const valid = errors.length === 0;
@@ -2067,11 +2125,6 @@ class QuadFormWC extends HTMLElement {
     if (submitBtn) submitBtn.disabled = !valid;
     if (submitBtnTiny) submitBtnTiny.disabled = !valid;
 
-    // period-submit: reflect validity on the period control
-    if (this.hasAttribute('period-submit')) {
-      const period = this.shadowRoot.querySelector('.tiny-period');
-      if (period) period.classList.toggle('ready', valid);
-    }
     
     // Emit validation event
     this.dispatchEvent(new CustomEvent('validation-changed', {
