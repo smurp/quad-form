@@ -124,11 +124,14 @@ class QuadFormWC extends HTMLElement {
       graph: false
     };
     
-    // Field modes: {qname|uri|literal}
+    // Field modes: {qname|uri|literal} — QName is the default face
+    // for s, p AND o (Shawn 2026-07-18); URI entry still validates
+    // under 'qname' (validateField treats them as one identifier
+    // family), so the default costs full-URI typists nothing
     this.fieldTypes = {
-      subject: 'uri',
+      subject: 'qname',
       predicate: 'qname',
-      object: 'uri',
+      object: 'qname',
       graph: 'qname'
     };
     
@@ -2438,12 +2441,12 @@ class QuadFormWC extends HTMLElement {
     };
     
     this.fieldTypes = {
-      subject: 'uri',
+      subject: 'qname',
       predicate: 'qname',
-      object: 'uri',
+      object: 'qname',
       graph: 'qname'
     };
-    
+
     this.objectDatatype = '';
     this.objectLanguage = '';
     this.objectUsesTextarea = false;
