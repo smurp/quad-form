@@ -215,7 +215,7 @@ class QuadFormWC extends HTMLElement {
     const ov = document.createElement('div');
     ov.id = 'self-loop-overlay';
     ov.innerHTML =
-      '<span class="slo-msg">awaiting subject for self loop</span>' +
+      '<span class="slo-msg">self-loop</span>' +
       '<button type="button" class="slo-close"' +
       ' title="not a self loop — choose an object">×</button>';
     ov.querySelector('.slo-close').addEventListener('click', () => {
@@ -1030,11 +1030,24 @@ class QuadFormWC extends HTMLElement {
         /* period-submit: the HOST manages submission chrome (its own
            Submit button + programmatic handleSubmit; the say-line's
            sits in its bar, visible in BOTH faces) — the internal
-           action row goes in EVERY mode, and the tiny period returns
-           to plain punctuation: the sentence still ends with "." but
-           the button lives with the host. */
+           action row goes in EVERY mode, and the TINY period's slot
+           becomes the × CLEAR (Shawn 2026-07-19): it empties s|p|o
+           back to their default conditions, touching nothing else. */
         :host([period-submit]) .form-actions {
           display: none;
+        }
+        .tiny-clear { display: none; }
+        :host([period-submit]) [data-mode="tiny"] .tiny-period {
+          display: none;
+        }
+        :host([period-submit]) [data-mode="tiny"] .tiny-clear {
+          display: inline-block; cursor: pointer;
+          border: none; background: none;
+          padding: 0 2px; margin-left: 4px;
+          font-weight: bold; font-size: 14px; color: #8aa4b8;
+        }
+        :host([period-submit]) [data-mode="tiny"] .tiny-clear:hover {
+          color: #333;
         }
         /* hide-graph: suppress the mental-space widget in EVERY mode
            — the host asserts into the space IT is pointed at */
@@ -1415,6 +1428,8 @@ class QuadFormWC extends HTMLElement {
         </div>
         
         <span class="tiny-period">.</span>
+        <button type="button" class="tiny-clear"
+                title="clear the sentence (s, p and o back to their defaults)">×</button>
         
         <!-- Graph field -->
         <div class="field-group graph-field">
@@ -1664,7 +1679,13 @@ class QuadFormWC extends HTMLElement {
     if (submitBtnTiny) {
       submitBtnTiny.addEventListener('click', (e) => this.handleSubmit(e));
     }
-    
+
+    // the TINY × (period-submit hosts): clear the sentence only
+    const tinyClear = this.shadowRoot.querySelector('.tiny-clear');
+    if (tinyClear) {
+      tinyClear.addEventListener('click', () => this.clearTriple());
+    }
+
     // Clear button
     const clearBtn = this.shadowRoot.getElementById('clear-btn');
     if (clearBtn) {
@@ -2501,6 +2522,58 @@ class QuadFormWC extends HTMLElement {
     }
   }
   
+  /**
+   * Clear ONLY the sentence (Shawn 2026-07-19, the TINY ×): s, p and
+   * o back to their default conditions — values empty, types to the
+   * QName defaults, literal chrome reset — touching nothing else
+   * (graph, prefixes, picker options, and the input/picker control
+   * choices all stand). Awaiting-self-loop stands down too: the
+   * wipe is a fresh slate.
+   */
+  clearTriple() {
+    this.awaitingSelfLoop = false;
+    for (const f of ['subject', 'predicate', 'object']) {
+      this.fieldValues[f] = '';
+      this.fieldTypes[f] = 'qname';
+      this.tinyFieldTypes[f] = 'qname';
+      const input = this.shadowRoot.getElementById(`${f}-input`);
+      if (input) {
+        input.value = '';
+        input.classList.remove('presumed');
+        input.style.backgroundColor = '';
+      }
+      const select = this.shadowRoot.getElementById(`${f}-select`);
+      if (select) {
+        select.value = '';
+        select.classList.remove('presumed');
+      }
+      const typeSel = this.shadowRoot
+        .querySelector(`.type-select-dropdown[data-field="${f}"]`);
+      if (typeSel) typeSel.value = 'qname';
+    }
+    this.objectDatatype = '';
+    this.objectLanguage = '';
+    this.objectUsesTextarea = false;
+    const textarea = this.shadowRoot.getElementById('object-textarea');
+    if (textarea) {
+      textarea.value = '';
+      textarea.classList.add('hidden');
+      textarea.classList.remove('presumed');
+    }
+    const objectInput = this.shadowRoot.getElementById('object-input');
+    if (objectInput && this.fieldControls.object === 'input') {
+      objectInput.classList.remove('hidden');
+    }
+    const languageInput = this.shadowRoot.getElementById('language-input');
+    if (languageInput) {
+      languageInput.value = '';
+      languageInput.disabled = true;
+    }
+    this.updateTinyDecorators?.();
+    this.updateFieldValidation?.();
+    this.validate();
+  }
+
   clear() {
     const container = this.shadowRoot.querySelector('.quad-form-container');
     const mode = container?.dataset.mode || 'full';
