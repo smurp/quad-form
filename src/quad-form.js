@@ -176,6 +176,54 @@ class QuadFormWC extends HTMLElement {
     this._predicateOptions = null;   // host-supplied picker values
     this._subjectOptions = null;     // {value, label} pairs
     this._objectOptions = null;
+    /** AWAITING-SELF-LOOP (Shawn 2026-07-18): every new edge is
+     * born a self-loop — while set, the object slot wears a grey
+     * overlay ("awaiting subject for self loop") and SHADOWS the
+     * subject, until the overlay's × or a satisfied Submit. */
+    this._awaitingSelfLoop = false;
+    // the shadow rides typed subject edits and Tab completions
+    this.addEventListener('field-changed', (e) => {
+      if (e.detail?.field === 'subject') this._maybeShadowObject();
+    });
+  }
+
+  get awaitingSelfLoop() { return this._awaitingSelfLoop; }
+  set awaitingSelfLoop(on) {
+    on = !!on;
+    if (on === this._awaitingSelfLoop) return;
+    this._awaitingSelfLoop = on;
+    this._syncSelfLoopOverlay();
+    if (on) this._maybeShadowObject();
+  }
+
+  /** While awaiting-self-loop, the object IS the subject. */
+  _maybeShadowObject() {
+    if (!this._awaitingSelfLoop) return;
+    const v = this.getField('subject');
+    if (this.getField('object') !== v) this.setField('object', v);
+  }
+
+  _syncSelfLoopOverlay() {
+    const root = this.shadowRoot;
+    const host = root?.querySelector('.object-field');
+    const existing = root?.getElementById('self-loop-overlay');
+    if (!this._awaitingSelfLoop) {
+      existing?.remove();
+      return;
+    }
+    if (!host || existing) return;
+    const ov = document.createElement('div');
+    ov.id = 'self-loop-overlay';
+    ov.innerHTML =
+      '<span class="slo-msg">awaiting subject for self loop</span>' +
+      '<button type="button" class="slo-close"' +
+      ' title="not a self loop — choose an object">×</button>';
+    ov.querySelector('.slo-close').addEventListener('click', () => {
+      this.awaitingSelfLoop = false;
+      this.setField('object', '');
+      root.getElementById('object-input')?.focus();
+    });
+    host.appendChild(ov);
   }
 
   /** Normalize host-supplied options: strings or {value, label}. */
@@ -808,7 +856,30 @@ class QuadFormWC extends HTMLElement {
         .field-group {
           margin-bottom: 15px;
         }
-        
+
+        /* AWAITING-SELF-LOOP: the object slot under its
+           semi-transparent grey overlay — the object shadows the
+           subject until the × (or a satisfied Submit) cancels */
+        .object-field { position: relative; }
+        #self-loop-overlay {
+          position: absolute; inset: 0; z-index: 5;
+          background: rgba(120, 120, 120, 0.55);
+          border-radius: 3px;
+          display: flex; align-items: center; justify-content: center;
+          gap: 6px; padding: 0 4px;
+          font-size: 10px; color: #fff;
+          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+          white-space: nowrap; overflow: hidden;
+        }
+        #self-loop-overlay .slo-close {
+          cursor: pointer; flex: none;
+          border: none; border-radius: 50%;
+          width: 14px; height: 14px; padding: 0;
+          line-height: 13px; font-size: 11px;
+          background: rgba(255, 255, 255, 0.9); color: #333;
+        }
+        #self-loop-overlay .slo-close:hover { background: #fff; }
+
         .field-label {
           display: inline-block;
           font-weight: bold;
@@ -2396,7 +2467,8 @@ class QuadFormWC extends HTMLElement {
         this.graphPath = path;
       }
     }
-    
+
+    if (name === 'subject') this._maybeShadowObject();
     this.validate();
   }
   
