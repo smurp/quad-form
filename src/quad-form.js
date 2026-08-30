@@ -352,6 +352,42 @@ class QuadFormWC extends HTMLElement {
   get mmmServer() { return this._mmmServer; }
   set mmmServer(value) { this._mmmServer = value; }
   
+  /**
+   * WHICH SLOTS THIS FORM SHOWS — 'spo' (default), 'po', 'o', 'p', …
+   *
+   * A second axis, orthogonal to mode: mode says how much CHROME, this
+   * says which SLOTS. Authors write it compactly (`slots="po"`); the DOM
+   * carries the spaced form because CSS `~=` matches whitespace-separated
+   * words and would never match inside "spo".
+   *
+   * HIDING IS NOT MAKING OPTIONAL. A hidden slot keeps its value and the
+   * host supplies it — `<quad-form slots="po">` about a known subject
+   * still asserts that subject, and validate() still wants one. The lone
+   * exception is graph, which has worked that way via hide-graph since
+   * before this existed.
+   *
+   * Deliberately does NOT touch nano: nano's own CSS already hides
+   * everything but the object, so leaving it alone keeps every existing
+   * caller behaving exactly as it did.
+   */
+  get slots() {
+    const attr = (this.getAttribute('slots') || '').toLowerCase().replace(/[^spo]/g, '');
+    return attr || 'spo';
+  }
+
+  set slots(value) {
+    if (value) this.setAttribute('slots', value);
+    else this.removeAttribute('slots');
+    const container = this.shadowRoot?.querySelector('.quad-form-container');
+    if (container) container.dataset.slots = this.slotTokens;
+  }
+
+  /** The slot set as CSS-matchable words: 'p o'. */
+  get slotTokens() { return this.slots.split('').join(' '); }
+
+  /** Is this slot on show? Hosts ask before focusing or decorating one. */
+  showsSlot(name) { return this.slots.includes(String(name).charAt(0)); }
+
   get prefixes() { return this._prefixes; }
   set prefixes(value) { 
     this._prefixes = { ...COMMON_PREFIXES, ...value };
@@ -667,10 +703,29 @@ class QuadFormWC extends HTMLElement {
   
   render() {
     const initialMode = this.nanoMode ? 'nano' : this.tinyMode ? 'tiny' : 'full';
-    
+    const initialSlots = this.slotTokens;
+
     this.shadowRoot.innerHTML = `
       <style>
         * { box-sizing: border-box; }
+
+        /* ── WHICH SLOTS, as an axis of its own ──────────────────────
+           Modes (full/tiny/nano) say how much CHROME to show; this says
+           which SLOTS exist at all. They were one axis until 2026-08-29
+           and that conflation is why nano — the only way to get a single
+           field — could only ever be the OBJECT, and only with nano's
+           chrome. A form that shows predicate+object about a known
+           subject had no spelling.
+
+           Hiding is NOT making optional: a hidden slot keeps its value,
+           the host sets it, and validation still wants it. The one
+           exception is graph, which has always worked that way via
+           hide-graph and says so at validate(). */
+        [data-slots]:not([data-slots~="s"]) .subject-field,
+        [data-slots]:not([data-slots~="p"]) .predicate-field,
+        [data-slots]:not([data-slots~="o"]) .object-field {
+          display: none;
+        }
         
         .quad-form-container {
           font-family: monospace;
@@ -1306,7 +1361,7 @@ class QuadFormWC extends HTMLElement {
         }
       </style>
       
-      <div class="quad-form-container" data-mode="${initialMode}">
+      <div class="quad-form-container" data-mode="${initialMode}" data-slots="${initialSlots}">
         ${this.renderUnifiedContent()}
         
         <div class="prefixes-overlay" id="prefixes-overlay">
