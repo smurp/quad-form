@@ -1109,6 +1109,12 @@ class QuadFormWC extends HTMLElement {
         :host([hide-graph]) .graph-field {
           display: none !important;
         }
+        /* bare-labels: the field labels drop out — a host that supplies
+           its own chrome (the DSEF's predicate label beside a slots="o"
+           row) mounts a FULL-mode form without reaching into the shadow */
+        :host([bare-labels]) .field-label {
+          display: none !important;
+        }
         /* compact: the whole sentence on ONE line — the container
            chrome drops (the host supplies the card), the inputs flex
            and ellipsize. The say-line's mini-face geometry. */
@@ -1780,12 +1786,16 @@ class QuadFormWC extends HTMLElement {
         input.addEventListener('input', (e) => {
           // touching a presumed prefill makes it definite
           this._clearPresumed(field);
-          this.fieldValues[field] = e.target.value;
+          // a checkbox (xsd:boolean) says true/false — the boolean's own
+          // spelling — never its value attribute ("on")
+          const value = e.target.type === 'checkbox'
+            ? String(e.target.checked) : e.target.value;
+          this.fieldValues[field] = value;
           this.updateFieldValidation();
           
           // Emit field-changed event
           this.dispatchEvent(new CustomEvent('field-changed', {
-            detail: { field, value: e.target.value },
+            detail: { field, value },
             bubbles: true,
             composed: true
           }));
@@ -2286,6 +2296,11 @@ class QuadFormWC extends HTMLElement {
     const html5Type = XSD_TO_HTML5[datatype];
     if (html5Type) {
       objectInput.type = html5Type;
+      // a box that appears AFTER the value was set (ponder's order:
+      // value, then datatype) still shows the value
+      if (html5Type === 'checkbox') {
+        objectInput.checked = /^true$/i.test(String(this.fieldValues.object ?? ''));
+      }
       
       // Special handling for numbers
       if (datatype === 'xsd:integer') {
@@ -2519,6 +2534,9 @@ class QuadFormWC extends HTMLElement {
     // fieldControls (the CSS forces it) — write where the user looks
     if ((this.tinyMode || this.fieldControls[name] === 'input') && input) {
       input.value = value;
+      // xsd:boolean is a checkbox (XSD_TO_HTML5): the value is whether
+      // the box is CHECKED, not its value attribute
+      if (input.type === 'checkbox') input.checked = /^true$/i.test(String(value ?? ''));
     }
     if (this.fieldControls[name] === 'select' && select) {
       select.value = value;
