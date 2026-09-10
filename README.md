@@ -121,6 +121,31 @@ quadForm.prefixes = {
 - **`currentIdentity`** - User identity for `by` field
 - **`expandCuries`** - Boolean, expand CURIEs before submission
 - **`defaultGraph`** - Default graph for new quads
+- **`subjectOptions` / `predicateOptions` / `objectOptions`** - the pick list
+  for a field. Each entry is a string, or `{ value, label, group? }`.
+- **`vocabularyFields`** - array of field names whose options are a
+  CONTROLLED VOCABULARY rather than suggestions (e.g. `['predicate']`).
+
+### Pick lists: sorted, grouped, and offered to the input too
+
+Options are **always sorted by their label** — a list is for finding a term
+you can already name, and an order that encodes something else reads as no
+order at all once there are a couple of hundred entries. Pass them in
+whatever order is convenient.
+
+An option may carry a **`group`**. Groups render as `<optgroup>`, keep the
+order they first appear in, and are sorted within; ungrouped options sort as
+one run ahead of them. Use a group when the ordering carries meaning the
+reader should see — "the terms this subject's type affords", say — rather
+than leaving it as an invisible boundary in a flat list.
+
+The same options become a **`<datalist>`** behind the field's input face, so
+typing completes against exactly what the picker offers. A field named in
+`vocabularyFields` gets a third validation state: a value that is
+well-formed but is **not** one of the offered terms shows amber with the
+reason on hover. It is a hint and not a gate — `fieldValidity` is untouched,
+because typing a term the host has not heard of is how anything new gets
+said.
 
 ### Methods
 

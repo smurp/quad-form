@@ -176,6 +176,13 @@ class QuadFormWC extends HTMLElement {
     this._predicateOptions = null;   // host-supplied picker values
     this._subjectOptions = null;     // {value, label} pairs
     this._objectOptions = null;
+    
+    // Fields whose options are a CONTROLLED VOCABULARY rather than mere
+    // suggestions. A value outside a vocabulary is worth saying something
+    // about (it is usually a typo); a subject outside the offered ones is
+    // just a new subject, which is the commonest thing there is. Opt-in,
+    // because only the host knows which of its lists is which.
+    this._vocabularyFields = new Set();
     /** AWAITING-SELF-LOOP (Shawn 2026-07-18): every new edge is
      * born a self-loop — while set, the object slot wears a grey
      * overlay ("awaiting subject for self loop") and SHADOWS the
@@ -231,7 +238,48 @@ class QuadFormWC extends HTMLElement {
     if (!Array.isArray(list) || !list.length) return null;
     return list.map((o) => (typeof o === 'string')
       ? { value: o, label: o }
-      : { value: o.value, label: o.label ?? o.value });
+      : { value: o.value, label: o.label ?? o.value, group: o.group ?? null });
+  }
+
+  /**
+   * OPTIONS ARE ALWAYS SORTED, and grouped when the supplier says so.
+   *
+   * A pick list is for finding a term you can already name, and an order
+   * that encodes something else — how many subjects carry it, say — reads
+   * as no order at all once there are a couple of hundred of them. So the
+   * options are sorted by label here rather than trusted to arrive sorted.
+   *
+   * A supplier that has a MEANINGFUL grouping (the terms this subject's
+   * types afford, before everything else) passes `group` on each option;
+   * groups keep the order they first appear in, are labelled in the list,
+   * and are sorted WITHIN. Ungrouped options sort as one run ahead of any
+   * groups.
+   */
+  static _optionsMarkup(norm) {
+    const byLabel = (a, b) =>
+      String(a.label).localeCompare(String(b.label), undefined, { sensitivity: 'base' })
+      || String(a.value).localeCompare(String(b.value));
+    const opt = (o) => `<option value="${QuadFormWC._escOpt(o.value)}">`
+      + `${QuadFormWC._escOpt(o.label)}</option>`;
+    const list = [...(norm ?? [])];
+    const groups = [];
+    const bare = [];
+    for (const o of list) {
+      if (!o.group) { bare.push(o); continue; }
+      let g = groups.find((x) => x.name === o.group);
+      if (!g) { g = { name: o.group, items: [] }; groups.push(g); }
+      g.items.push(o);
+    }
+    return bare.sort(byLabel).map(opt).join('')
+      + groups.map((g) => `<optgroup label="${QuadFormWC._escOpt(g.name)}">`
+        + g.items.sort(byLabel).map(opt).join('') + '</optgroup>').join('');
+  }
+
+  /** The same options as completions for the INPUT face. */
+  static _datalistMarkup(norm) {
+    return [...(norm ?? [])]
+      .sort((a, b) => String(a.value).localeCompare(String(b.value), undefined, { sensitivity: 'base' }))
+      .map((o) => `<option value="${QuadFormWC._escOpt(o.value)}"></option>`).join('');
   }
 
   static _escOpt(s) {
@@ -246,12 +294,12 @@ class QuadFormWC extends HTMLElement {
     if (select) {
       const current = this.fieldValues[field];
       const cap = field.charAt(0).toUpperCase() + field.slice(1);
-      select.innerHTML = `<option value="">Select ${cap}...</option>` +
-        (norm ?? []).map((o) =>
-          `<option value="${QuadFormWC._escOpt(o.value)}">` +
-          `${QuadFormWC._escOpt(o.label)}</option>`).join('');
+      select.innerHTML = `<option value="">Select ${cap}...</option>`
+        + QuadFormWC._optionsMarkup(norm);
       if (current) select.value = current;
     }
+    const datalist = this.shadowRoot?.getElementById(`${field}-list`);
+    if (datalist) datalist.innerHTML = QuadFormWC._datalistMarkup(norm);
   }
 
   /**
@@ -276,6 +324,11 @@ class QuadFormWC extends HTMLElement {
   set subjectOptions(list) { this._setFieldOptions('subject', list); }
   get subjectOptions() { return this._subjectOptions ?? []; }
   set objectOptions(list) { this._setFieldOptions('object', list); }
+  set vocabularyFields(fields) {
+    this._vocabularyFields = new Set(Array.isArray(fields) ? fields : []);
+    this.updateFieldValidation();
+  }
+  get vocabularyFields() { return [...this._vocabularyFields]; }
   get objectOptions() { return this._objectOptions ?? []; }
 
   /**
@@ -507,6 +560,35 @@ class QuadFormWC extends HTMLElement {
     }
   }
   
+  /**
+   * The look of a field's INPUT face — THREE states, not two.
+   *
+   * A value can be perfectly well-formed and still not be a term the
+   * offered vocabulary knows. That is allowed: a picker informs, it never
+   * restricts, and typing a term the host has not heard of is how anything
+   * new gets said. But it is usually a typo, so it is worth saying — in
+   * amber, with the reason on hover, and WITHOUT touching fieldValidity.
+   * Only fields the host declared in `vocabularyFields` get the hint.
+   */
+  _paintInput(input, field, isValid) {
+    const value = input.value;
+    if (!value) {
+      input.style.backgroundColor = '';
+      input.title = '';
+      input.removeAttribute('data-unknown');
+      return;
+    }
+    const known = this._vocabularyFields.has(field)
+      ? new Set((this[`_${field}Options`] ?? []).map((o) => o.value)) : null;
+    const unknown = isValid && known?.size && !known.has(value);
+    input.style.backgroundColor = !isValid ? '#ffebee' : (unknown ? '#fff8e1' : '#e8f5e9');
+    input.title = unknown
+      ? `${value} is not one of the ${known.size} terms on offer — allowed, but check the spelling`
+      : '';
+    if (unknown) input.setAttribute('data-unknown', '');
+    else input.removeAttribute('data-unknown');
+  }
+
   updateFieldValidation() {
     const container = this.shadowRoot.querySelector('.quad-form-container');
     const mode = container?.dataset.mode || 'full';
@@ -564,12 +646,7 @@ class QuadFormWC extends HTMLElement {
           const value = input.value;
           const isValid = this.validateField(field, value, type);
           this.fieldValidity[field] = isValid;
-          
-          if (value) {
-            input.style.backgroundColor = isValid ? '#e8f5e9' : '#ffebee';
-          } else {
-            input.style.backgroundColor = '';
-          }
+          this._paintInput(input, field, isValid);
         }
       });
       
@@ -1423,6 +1500,7 @@ class QuadFormWC extends HTMLElement {
           <input type="text" 
                  class="field-input ${this.fieldControls.subject === 'select' ? 'hidden' : ''}" 
                  id="subject-input"
+                 list="subject-list"
                  data-field="subject"
                  placeholder="${this.getPlaceholder('subject', this.fieldTypes.subject)}"
                  value="${this.fieldValues.subject}">
@@ -1433,6 +1511,7 @@ class QuadFormWC extends HTMLElement {
             <option value="">Select Subject...</option>
             ${this.renderSelectOptions('subject')}
           </select>
+          ${this.renderDatalist('subject')}
         </div>
         
         <!-- Predicate field -->
@@ -1449,6 +1528,7 @@ class QuadFormWC extends HTMLElement {
           <input type="text" 
                  class="field-input ${this.fieldControls.predicate === 'select' ? 'hidden' : ''}" 
                  id="predicate-input"
+                 list="predicate-list"
                  data-field="predicate"
                  placeholder="${this.getPlaceholder('predicate', this.fieldTypes.predicate)}"
                  value="${this.fieldValues.predicate}">
@@ -1459,6 +1539,7 @@ class QuadFormWC extends HTMLElement {
             <option value="">Select Predicate...</option>
             ${this.renderSelectOptions('predicate')}
           </select>
+          ${this.renderDatalist('predicate')}
         </div>
         
         <!-- Object field -->
@@ -1485,6 +1566,7 @@ class QuadFormWC extends HTMLElement {
             <input type="text" 
                    class="field-input ${this.fieldControls.object === 'select' || this.objectUsesTextarea ? 'hidden' : ''}" 
                    id="object-input"
+                 list="object-list"
                    data-field="object"
                    placeholder="${this.getPlaceholder('object', this.fieldTypes.object)}"
                    value="${this.fieldValues.object}">
@@ -1500,6 +1582,7 @@ class QuadFormWC extends HTMLElement {
             <option value="">Select Object...</option>
             ${this.renderSelectOptions('object')}
           </select>
+          ${this.renderDatalist('object')}
         </div>
         
         <span class="tiny-period">.</span>
@@ -1614,9 +1697,17 @@ class QuadFormWC extends HTMLElement {
     const opts = fieldName === 'predicate' ? this.predicateOptions
       : fieldName === 'subject' ? this.subjectOptions
       : fieldName === 'object' ? this.objectOptions : [];
-    return opts.map((o) =>
-      `<option value="${QuadFormWC._escOpt(o.value)}">` +
-      `${QuadFormWC._escOpt(o.label)}</option>`).join('');
+    return QuadFormWC._optionsMarkup(QuadFormWC._normalizeOptions(opts));
+  }
+  
+  /** The datalist behind a field's INPUT face, so typing completes against
+   *  the same controlled vocabulary the picker offers. */
+  renderDatalist(fieldName) {
+    const opts = fieldName === 'predicate' ? this.predicateOptions
+      : fieldName === 'subject' ? this.subjectOptions
+      : fieldName === 'object' ? this.objectOptions : [];
+    return `<datalist id="${fieldName}-list">`
+      + QuadFormWC._datalistMarkup(QuadFormWC._normalizeOptions(opts)) + '</datalist>';
   }
   
   getPlaceholder(fieldName, fieldType) {
