@@ -1115,6 +1115,20 @@ class QuadFormWC extends HTMLElement {
         :host([bare-labels]) .field-label {
           display: none !important;
         }
+        /* hide-object-type: the DATATYPE SELECT drops out, for a host whose
+           vocabulary already decided the datatype. A range that says
+           xsd:date is not a question, and a select asking it is the form
+           admitting it does not trust what it just read
+           (iss:datatype-decided-needs-no-vetting).
+           NOTE WHAT IT DOES NOT DO: the type is still SET, still drives the
+           HTML5 control and still validates — this suppresses the control
+           that VETS it, nothing else. A host that offers a way to reveal
+           the select removes the attribute; nobody reaches into this
+           shadow to do it. Deliberately NOT the TINY mode's blanket
+           hiding, which also forces text inputs and eats the arrow keys. */
+        :host([hide-object-type]) .type-select-dropdown[data-field="object"] {
+          display: none !important;
+        }
         /* compact: the whole sentence on ONE line — the container
            chrome drops (the host supplies the card), the inputs flex
            and ellipsize. The say-line's mini-face geometry. */
