@@ -1091,6 +1091,18 @@ class QuadFormWC extends HTMLElement {
           resize: vertical;
         }
         
+        /* A HOST THAT KNOWS A FIELD IS REQUIRED CAN SAY SO WHILE IT IS
+           STILL EMPTY. quad-form paints only what has been TYPED — an
+           empty field gets no colour, which reads as "fine so far" in a
+           form where every other unfilled thing is reddish. host-invalid
+           lets the host say otherwise; it is dropped the moment the value
+           becomes acceptable, so the inline paint below takes over from
+           there and the two never argue. */
+        :host([host-invalid]) .field-input,
+        :host([host-invalid]) .field-textarea {
+          background: #fbeeee;
+          border-color: #d08080;
+        }
         .field-input:focus, .field-select:focus, .field-textarea:focus {
           outline: none;
           border-color: #4CAF50;
