@@ -2,6 +2,7 @@
   "name": "@mmmttoys/quad-form",
   "version": "0.11.0",
   "description": "A web component for creating RDF quads with CURIE support and XSD datatypes",
+  "type": "module",
   "main": "dist/quad-form.js",
   "module": "src/quad-form.js",
   "types": "index.d.ts",
@@ -17,7 +18,7 @@
     "build:minify": "terser src/quad-form.js -o dist/quad-form.min.js --compress --mangle",
     "dev": "npx http-server . -p 8001 -c-1",
     "prepublishOnly": "npm run build",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npx playwright test"
   },
   "repository": {
     "type": "git",
@@ -43,6 +44,7 @@
   },
   "homepage": "https://github.com/smurp/quad-form#readme",
   "devDependencies": {
+    "@playwright/test": "^1.48.0",
     "terser": "^5.19.0"
   },
   "dependencies": {

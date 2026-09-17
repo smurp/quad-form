@@ -1,1 +1,5 @@
 node_modules/
+
+# Stats tracked at workspace level (~/TTOYS/test/stats/)
+test/stats.jsonl
+test-results/
