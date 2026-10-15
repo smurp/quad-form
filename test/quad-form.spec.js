@@ -107,3 +107,89 @@ test.describe('<quad-form>', () => {
     await expect(input).toHaveCSS('border-color', before.border);
   });
 });
+
+// THE OBJECT FOLLOWS THE PREDICATE (iss:quadform-domain-range, 2026-10-14):
+// a host that knows the vocabulary hands in objectGuide, and the object
+// control is reshaped ahead of the person whenever the predicate changes —
+// but never over a value already given, nor over a type chosen by hand.
+test.describe('<quad-form> objectGuide', () => {
+  const FOAF = 'http://xmlns.com/foaf/0.1/';
+
+  test.beforeEach(async ({ page }) => {
+    await gotoFormPage(page);
+    await page.evaluate((FOAF) => {
+      const qf = document.getElementById('qf');
+      window.asked = [];
+      window.guided = [];
+      qf.addEventListener('object-guided', (e) => window.guided.push(e.detail));
+      qf.objectGuide = async (p) => {
+        window.asked.push(p);
+        if (p === `${FOAF}birthday`) return { type: 'xsd:date', decided: true };
+        if (p === `${FOAF}knows`) {
+          return { type: 'qname', decided: true, entity: true, options: [{ value: 'ex:alice' }, { value: 'ex:bob' }] };
+        }
+        return null;                                   // nothing decided
+      };
+    }, FOAF);
+  });
+
+  const objectType = (page) => page.evaluate(() => document.getElementById('qf').fieldTypes.object);
+  const lastGuided = (page) => page.evaluate(() => window.guided.at(-1) ?? null);
+
+  test('a predicate set by the host shapes the object at once: a date range, a date control', async ({ page }) => {
+    await page.evaluate((FOAF) => document.getElementById('qf').setField('predicate', `${FOAF}birthday`), FOAF);
+    await expect.poll(() => lastGuided(page)).toEqual({ predicate: `${FOAF}birthday`, type: 'xsd:date', applied: true });
+    expect(await objectType(page)).toBe('xsd:date');
+    await expect(inForm(page, '#object-input')).toHaveAttribute('type', 'date');
+  });
+
+  test('a class range: an entity slot, and its candidates on offer', async ({ page }) => {
+    await page.evaluate((FOAF) => document.getElementById('qf').setField('predicate', `${FOAF}birthday`), FOAF);
+    await expect.poll(() => objectType(page)).toBe('xsd:date');
+    await page.evaluate((FOAF) => document.getElementById('qf').setField('predicate', `${FOAF}knows`), FOAF);
+    await expect.poll(() => objectType(page)).toBe('qname');
+    expect(await page.evaluate(() => document.getElementById('qf').objectOptions.map((o) => o.value)))
+      .toEqual(['ex:alice', 'ex:bob']);
+  });
+
+  test('a TYPED predicate is asked about once the typing pauses, not per keystroke', async ({ page }) => {
+    // the predicate opens on its picker face; typing is the input face's
+    await inForm(page, '.control-toggle[data-field="predicate"]').click();
+    await expect(inForm(page, '#predicate-input')).toBeVisible();
+    await inForm(page, '#predicate-input').pressSequentially('foaf:birthday', { delay: 20 });
+    await expect.poll(() => page.evaluate(() => window.asked)).toEqual([`${FOAF}birthday`]);
+    await expect.poll(() => objectType(page)).toBe('xsd:date');
+  });
+
+  test('nothing decided leaves the object as it was', async ({ page }) => {
+    await page.evaluate(() => document.getElementById('qf').setField('predicate', 'ex:unheardOf'));
+    await expect.poll(() => lastGuided(page)).toMatchObject({ type: null, applied: false });
+    expect(await objectType(page)).toBe('qname');
+  });
+
+  test('a value already given is not reshaped under the person', async ({ page }) => {
+    await page.evaluate((FOAF) => {
+      const qf = document.getElementById('qf');
+      qf.setField('object', 'ex:alice');
+      qf.setField('predicate', `${FOAF}birthday`);
+    }, FOAF);
+    await expect.poll(() => lastGuided(page)).toMatchObject({ type: 'xsd:date', applied: false });
+    expect(await objectType(page)).toBe('qname');
+    expect(await page.evaluate(() => document.getElementById('qf').getField('object'))).toBe('ex:alice');
+  });
+
+  test('a type chosen by hand while the guide is asked is not overridden', async ({ page }) => {
+    await page.evaluate((FOAF) => {
+      const qf = document.getElementById('qf');
+      let release;
+      qf.objectGuide = (p) => new Promise((r) => { release = () => r({ type: 'xsd:date', decided: true }); });
+      qf.setField('predicate', `${FOAF}birthday`);
+      const sel = qf.shadowRoot.getElementById('object-type-select');
+      sel.value = 'xsd:string';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      release();
+    }, FOAF);
+    await expect.poll(() => lastGuided(page)).toMatchObject({ type: 'xsd:date', applied: false });
+    expect(await objectType(page)).toBe('xsd:string');
+  });
+});

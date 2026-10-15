@@ -192,6 +192,90 @@ class QuadFormWC extends HTMLElement {
     this.addEventListener('field-changed', (e) => {
       if (e.detail?.field === 'subject') this._maybeShadowObject();
     });
+    /** THE OBJECT FOLLOWS THE PREDICATE (objectGuide, below). A predicate
+     * being TYPED is asked about once the typing pauses; one chosen from
+     * the picker, or set by the host, at once (setField). */
+    this._objectGuide = null;
+    this._guideSeq = 0;
+    this._guideTimer = null;
+    this.addEventListener('field-changed', (e) => {
+      if (e.detail?.field !== 'predicate' || !this._objectGuide) return;
+      clearTimeout(this._guideTimer);
+      this._guideTimer = setTimeout(() => this._applyObjectGuide(), QuadFormWC.GUIDE_SETTLE_MS);
+    });
+  }
+
+  /** How long a typed predicate rests before its object is reshaped. */
+  static GUIDE_SETTLE_MS = 200;
+
+  /**
+   * THE OBJECT FOLLOWS THE PREDICATE (iss:quadform-domain-range; range is
+   * form integrity, iss:ontological-enforcement). quad-form knows no
+   * vocabulary, so a host that does hands one in:
+   *
+   *   objectGuide: (predicateIri) → {type, decided, entity?, options?} | null
+   *                (or a promise of one)
+   *
+   * Whenever the predicate changes, the object control is reshaped AHEAD of
+   * the person — its type (a date control for a date range, an entity slot
+   * for a class), and its candidates — when the guide answers. null means
+   * "nothing decided": the object stays as the host has it. Two things are
+   * never overridden: an object that already holds a value (the value
+   * decides, as a value's own shape does in the DSEF; on a canvas it is the
+   * node dropped there), and a type changed by hand while the guide was
+   * being asked. Emits 'object-guided' {predicate, type, applied} once the
+   * guide has answered.
+   */
+  set objectGuide(fn) {
+    this._objectGuide = typeof fn === 'function' ? fn : null;
+    if (this._objectGuide && this.getField('predicate')) this._applyObjectGuide();
+  }
+  get objectGuide() { return this._objectGuide; }
+
+  async _applyObjectGuide() {
+    const ask = this._objectGuide;
+    const raw = this.getField('predicate');
+    if (!ask || !raw) return null;
+    const predicate = this.expandQName(raw);
+    const seq = ++this._guideSeq;
+    const typeAtAsk = this.tinyMode ? this.tinyFieldTypes.object : this.fieldTypes.object;
+    let guide = null;
+    try { guide = await ask(predicate); } catch (e) { guide = null; }
+    if (seq !== this._guideSeq) return null;             // a newer predicate is being asked about
+    if (!guide?.type) {
+      this._emitGuided(predicate, null, false);
+      return null;
+    }
+    const entity = guide.entity ?? (guide.type === 'qname' || guide.type === 'uri');
+    if (entity && Array.isArray(guide.options)) this.objectOptions = guide.options;
+    const typeNow = this.tinyMode ? this.tinyFieldTypes.object : this.fieldTypes.object;
+    const applied = !this.getField('object') && typeNow === typeAtAsk;
+    if (applied) this._setObjectType(guide.type, entity);
+    this._emitGuided(predicate, guide.type, applied);
+    return guide;
+  }
+
+  /** The object's type, set the way the type select sets it — so the
+   * control (textarea, HTML5 input type, language) follows — and in TINY,
+   * whose controls are always text, as the type it validates by. */
+  _setObjectType(type, entity) {
+    const sel = this.shadowRoot?.getElementById('object-type-select');
+    if (sel && [...sel.options].some((o) => o.value === type) && sel.value !== type) {
+      sel.value = type;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (this.tinyMode) {
+      this.tinyFieldTypes.object = entity ? 'qname' : 'string';
+      this.updateTinyDecorators();
+    }
+    this.updateFieldValidation();
+  }
+
+  _emitGuided(predicate, type, applied) {
+    this.dispatchEvent(new CustomEvent('object-guided', {
+      detail: { predicate, type, applied },
+      bubbles: true, composed: true,
+    }));
   }
 
   get awaitingSelfLoop() { return this._awaitingSelfLoop; }
@@ -2680,6 +2764,11 @@ class QuadFormWC extends HTMLElement {
     }
 
     if (name === 'subject') this._maybeShadowObject();
+    // a predicate set by the host is a choice made: its object, at once
+    if (name === 'predicate' && this._objectGuide) {
+      clearTimeout(this._guideTimer);
+      this._applyObjectGuide();
+    }
     this.validate();
   }
   

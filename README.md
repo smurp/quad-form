@@ -125,6 +125,30 @@ quadForm.prefixes = {
   for a field. Each entry is a string, or `{ value, label, group? }`.
 - **`vocabularyFields`** - array of field names whose options are a
   CONTROLLED VOCABULARY rather than suggestions (e.g. `['predicate']`).
+- **`objectGuide`** - what goes in the object for a predicate: a function
+  `(predicateIri) → {type, decided, entity?, options?} | null`, or a promise
+  of one. See below.
+
+### The object follows the predicate
+
+quad-form knows no vocabulary, so a host that does hands one in as
+`objectGuide`. Whenever the predicate changes — typed (once the typing
+pauses), chosen from the picker, or set with `setField` — the guide is asked,
+and the object control is reshaped **ahead of the person**: its `type` (an
+XSD datatype drives the HTML5 control, so a date range gives a date input;
+`'qname'` is an entity slot) and, for an entity, its `options`.
+
+```javascript
+quadForm.objectGuide = async (p) =>
+  p === 'http://xmlns.com/foaf/0.1/knows'
+    ? { type: 'qname', decided: true, entity: true, options: ['ex:alice', 'ex:bob'] }
+    : null;
+```
+
+Return `null` when nothing is decided: the object stays as it is. Two
+things are never overridden: an object that **already holds a value** (the
+value decides), and a type **changed by hand** while the guide was being
+asked. When the guide has answered, `object-guided` fires.
 
 ### Pick lists: sorted, grouped, and offered to the input too
 
@@ -171,6 +195,13 @@ All events bubble and are composed (cross shadow DOM boundaries).
 - **`validation-changed`** - Fired when form validation state changes
   ```javascript
   {detail: {valid: true, errors: []}}
+  ```
+
+- **`object-guided`** - Fired once `objectGuide` has answered for a predicate;
+  `type` is null when nothing was decided, `applied` false when the object
+  was left as it was (a value already given, or a type chosen meanwhile)
+  ```javascript
+  {detail: {predicate: 'http://xmlns.com/foaf/0.1/knows', type: 'qname', applied: true}}
   ```
 
 ## Datatypes Supported
