@@ -187,6 +187,15 @@ All events bubble and are composed (cross shadow DOM boundaries).
   {detail: {s, p, o, g, at, by, d?, l?}}
   ```
 
+- **`quad-dismissed`** - NANO only: fired instead of `quad-submitted` when the
+  editor is left with nothing in it — by blur, by Tab, or by a host calling
+  `handleSubmit` — so its host knows it is done. A control hidden under the
+  caret by a reshape (an input becoming a textarea) is not left: the caret
+  moves to the control shown, and nothing fires
+  ```javascript
+  {detail: {reason: 'blur' | 'tab' | 'submit'}}
+  ```
+
 - **`field-changed`** - Fired when field value changes
   ```javascript
   {detail: {field: 'subject', value: 'ex:Alice'}}

@@ -259,7 +259,12 @@ class QuadFormWC extends HTMLElement {
    * control (textarea, HTML5 input type, language) follows — and in TINY,
    * whose controls are always text, as the type it validates by. */
   _setObjectType(type, entity) {
-    const sel = this.shadowRoot?.getElementById('object-type-select');
+    const root = this.shadowRoot;
+    const sel = root?.getElementById('object-type-select');
+    // the caret, if it is in the object: a reshape that hides its control
+    // (an input becoming a textarea) must not leave the person nowhere
+    const caret = root?.activeElement;
+    const inObject = caret && (caret.id === 'object-input' || caret.id === 'object-textarea');
     if (sel && [...sel.options].some((o) => o.value === type) && sel.value !== type) {
       sel.value = type;
       sel.dispatchEvent(new Event('change', { bubbles: true }));
@@ -269,6 +274,11 @@ class QuadFormWC extends HTMLElement {
       this.updateTinyDecorators();
     }
     this.updateFieldValidation();
+    if (inObject && caret.classList.contains('hidden')) {
+      const shown = ['object-input', 'object-textarea'].map((id) => root.getElementById(id))
+        .find((el) => el && !el.classList.contains('hidden'));
+      shown?.focus();
+    }
   }
 
   _emitGuided(predicate, type, applied) {
@@ -2027,6 +2037,9 @@ class QuadFormWC extends HTMLElement {
         input.addEventListener('blur', (e) => {
           const container = this.shadowRoot.querySelector('.quad-form-container');
           const mode = container?.dataset.mode;
+          // a control hidden under the caret (the object reshaped to a
+          // textarea) was not left by anyone; _setObjectType moves the caret
+          if (input.classList.contains('hidden')) return;
           
           if (mode === 'nano' && field === 'object') {
             this.handleSubmit(e);
@@ -2088,6 +2101,7 @@ class QuadFormWC extends HTMLElement {
       objectTextarea.addEventListener('blur', (e) => {
         const container = this.shadowRoot.querySelector('.quad-form-container');
         const mode = container?.dataset.mode;
+        if (objectTextarea.classList.contains('hidden')) return;   // hidden under the caret
         
         if (mode === 'nano') {
           this.handleSubmit(e);
@@ -2573,6 +2587,14 @@ class QuadFormWC extends HTMLElement {
     // For nano mode, use default values for missing fields
     if (mode === 'nano') {
       if (!this.fieldValues.object || this.fieldValues.object.trim() === '') {
+        // NOTHING SAID: the editor is put down, not submitted — and says so,
+        // or its host never learns it is done (smurp 2026-10-16: a ponder
+        // cell's date editor, opened empty and clicked away from, stayed open)
+        this.dispatchEvent(new CustomEvent('quad-dismissed', {
+          detail: { reason: e?.type === 'blur' ? 'blur' : e?.key === 'Tab' ? 'tab' : 'submit' },
+          bubbles: true,
+          composed: true,
+        }));
         return;
       }
       

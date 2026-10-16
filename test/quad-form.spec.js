@@ -193,3 +193,60 @@ test.describe('<quad-form> objectGuide', () => {
     expect(await objectType(page)).toBe('xsd:string');
   });
 });
+
+// A NANO EDITOR LEFT EMPTY IS PUT DOWN, AND SAYS SO (smurp 2026-10-16: a
+// ponder cell's date editor, opened on an empty cell and clicked away from,
+// stayed open — and so did a second, and a third). Blur and Tab submit a
+// nano editor; with nothing in it they used to return silently, so its host
+// never learned it was done. Now quad-dismissed tells it, with the reason.
+test.describe('<quad-form> nano: put down empty', () => {
+  test.beforeEach(async ({ page }) => {
+    await gotoFormPage(page);
+    await page.evaluate(() => {
+      const qf = document.getElementById('qf');
+      window.events = [];
+      for (const name of ['quad-dismissed', 'quad-submitted']) {
+        qf.addEventListener(name, (e) => window.events.push([name, e.detail?.reason ?? null]));
+      }
+      qf.toggleNanoMode();
+    });
+    await expect.poll(() => page.evaluate(() =>
+      document.getElementById('qf').shadowRoot.activeElement?.id ?? null)).toBe('object-input');
+  });
+
+  const events = (page) => page.evaluate(() => window.events);
+
+  test('left empty by Tab or by blur, it is dismissed, not submitted', async ({ page }) => {
+    const input = inForm(page, '#object-input');
+    await input.press('Tab');
+    await expect.poll(() => events(page)).toEqual([['quad-dismissed', 'tab']]);
+    await input.focus();
+    await input.evaluate((el) => el.blur());
+    await expect.poll(() => events(page)).toEqual([['quad-dismissed', 'tab'], ['quad-dismissed', 'blur']]);
+  });
+
+  test('with something in it, Tab submits it and nothing is dismissed', async ({ page }) => {
+    const input = inForm(page, '#object-input');
+    await input.fill('ex:alice');
+    await input.press('Tab');
+    await expect.poll(() => events(page)).toEqual([['quad-submitted', null]]);
+  });
+
+  test('a control reshaped under the caret keeps the caret, and is not taken for left', async ({ page }) => {
+    await page.evaluate(() => {
+      const qf = document.getElementById('qf');
+      window.guided = [];
+      qf.addEventListener('object-guided', (e) => window.guided.push(e.detail));
+      qf.objectGuide = async () => {
+        await new Promise((r) => setTimeout(r, 150));      // answered after the caret is in
+        return { type: 'xsd:string', decided: true };
+      };
+      qf.setField('predicate', 'http://example.org/note');
+    });
+    await expect.poll(() => page.evaluate(() => window.guided.at(-1)?.applied ?? null)).toBe(true);
+    expect(await page.evaluate(() => document.getElementById('qf').shadowRoot.activeElement?.id ?? null))
+      .toBe('object-textarea');
+    expect(await events(page)).toEqual([]);
+  });
+});
+
