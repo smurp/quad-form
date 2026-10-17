@@ -1,6 +1,6 @@
 {
   "name": "@mmmttoys/quad-form",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "A web component for creating RDF quads with CURIE support and XSD datatypes",
   "type": "module",
   "main": "dist/quad-form.js",
