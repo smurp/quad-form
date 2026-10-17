@@ -250,3 +250,42 @@ test.describe('<quad-form> nano: put down empty', () => {
   });
 });
 
+// THE PICKER IS FOR THINGS (iss:quadform-picker-offered-where-a-textarea-
+// belongs; smurp 2026-09-09: "for those datatypes deserving a textarea the
+// input/picker toggle should be disabled and the picker never offered").
+// Toggling on a text object showed the picker UNDER the textarea, and both
+// carried the object's value: the form showed one statement and would save
+// another. A literal has nothing to pick, so the toggle is offered only when
+// the object is a reference.
+test.describe('<quad-form> the object picker is for things', () => {
+  test.beforeEach(async ({ page }) => {
+    await gotoFormPage(page);
+  });
+
+  const setType = (page, type) => page.evaluate((type) => {
+    const sel = document.getElementById('qf').shadowRoot.getElementById('object-type-select');
+    sel.value = type;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  }, type);
+  const toggle = (page) => inForm(page, '.control-toggle[data-field="object"]');
+
+  test('a text object offers no picker, and a toggle pressed anyway shows none', async ({ page }) => {
+    await setType(page, 'xsd:string');
+    await expect(inForm(page, '#object-textarea')).toBeVisible();
+    await expect(toggle(page)).toBeHidden();
+    await toggle(page).evaluate((b) => b.click());            // the way a stale handler or a test might
+    await expect(inForm(page, '#object-select')).toBeHidden();
+    await expect(inForm(page, '#object-textarea')).toBeVisible();
+  });
+
+  test('nor does a date; a reference does, and its picker works', async ({ page }) => {
+    await setType(page, 'xsd:date');
+    await expect(toggle(page)).toBeHidden();
+    await setType(page, 'qname');
+    await expect(toggle(page)).toBeVisible();
+    await toggle(page).click();
+    await expect(inForm(page, '#object-select')).toBeVisible();
+    await expect(inForm(page, '#object-input')).toBeHidden();
+  });
+});
+

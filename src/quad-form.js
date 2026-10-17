@@ -1663,7 +1663,8 @@ class QuadFormWC extends HTMLElement {
                    pattern="^([a-z]{2}|[a-z]{3})?$"
                    ${!this.objectUsesTextarea ? 'disabled' : ''}
                    value="${this.objectLanguage}">
-            <button type="button" class="control-toggle" data-field="object">
+            <button type="button" class="control-toggle ${this._objectIsReference() ? '' : 'hidden'}" data-field="object"
+                    ${this._objectIsReference() ? '' : 'disabled'}>
               ${this.fieldControls.object === 'input' ? '<strong>input</strong>/picker' : 'input/<strong>picker</strong>'}
             </button>
           </div>
@@ -1682,7 +1683,7 @@ class QuadFormWC extends HTMLElement {
                       placeholder="Enter text content...">${this.fieldValues.object}</textarea>
           </div>
           <span class="tiny-decorator object-right">&gt;</span>
-          <select class="field-select ${this.fieldControls.object === 'input' ? 'hidden' : ''}" 
+          <select class="field-select ${this.fieldControls.object === 'input' || !this._objectIsReference() ? 'hidden' : ''}" 
                   id="object-select"
                   data-field="object">
             <option value="">Select Object...</option>
@@ -2425,6 +2426,13 @@ class QuadFormWC extends HTMLElement {
       }
       const usePicker = isQNameOrUri && this.fieldControls.object === 'select';
       if (objectSelect) objectSelect.classList.toggle('hidden', !usePicker);
+      // and the toggle is offered only for a thing (iss:quadform-picker-
+      // offered-where-a-textarea-belongs)
+      const objectToggle = this.shadowRoot.querySelector('.control-toggle[data-field="object"]');
+      if (objectToggle) {
+        objectToggle.classList.toggle('hidden', !isQNameOrUri);
+        objectToggle.disabled = !isQNameOrUri;
+      }
 
       // Show/hide appropriate input and set the value
       if (shouldUseTextarea) {
@@ -2467,11 +2475,21 @@ class QuadFormWC extends HTMLElement {
     this.validate();
   }
 
+  /** Is the object a THING — a reference, which a picker can offer — rather
+   *  than a literal? (iss:quadform-picker-offered-where-a-textarea-belongs) */
+  _objectIsReference() {
+    const type = this.fieldTypes?.object;
+    return type === 'qname' || type === 'uri';
+  }
+
   handleControlToggle(e) {
     const button = e.target.closest('.control-toggle');
     if (!button) return;
     
     const field = button.dataset.field;
+    // THE PICKER IS FOR THINGS: a literal object has nothing to pick, and a
+    // picker shown under a textarea left two controls holding one value
+    if (field === 'object' && !this._objectIsReference()) return;
     const currentControl = this.fieldControls[field];
     const newControl = currentControl === 'input' ? 'select' : 'input';
     
