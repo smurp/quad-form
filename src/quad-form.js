@@ -538,6 +538,11 @@ class QuadFormWC extends HTMLElement {
   get prefixes() { return this._prefixes; }
   set prefixes(value) { 
     this._prefixes = { ...COMMON_PREFIXES, ...value };
+    // `:` IS NEVER A TABLE'S. It is bound only by defaultNamespace — a
+    // host's own namespace (nooviz: the panel's mental space) — so a table
+    // carrying a file's `@prefix : <http://example.org/>` cannot redefine
+    // it (smurp 2026-10-20: the deepest precedence is the special `:`)
+    delete this._prefixes[''];
   }
 
   /**
@@ -2499,6 +2504,13 @@ class QuadFormWC extends HTMLElement {
     return type === 'qname' || type === 'uri';
   }
 
+  /** Is the object to be read as a NAME — a reference face, with no
+   *  datatype or language said of it? A host may set a datatype without
+   *  turning the face (objectDatatype does not), so both are asked. */
+  _objectIsName() {
+    return this._objectIsReference() && !this.objectDatatype && !this.objectLanguage;
+  }
+
   handleControlToggle(e) {
     const button = e.target.closest('.control-toggle');
     if (!button) return;
@@ -2655,7 +2667,11 @@ class QuadFormWC extends HTMLElement {
     const quad = {
       s: this._expandQNames ? this.expandQName(this.fieldValues.subject) : this.fieldValues.subject,
       p: this._expandQNames ? this.expandQName(this.fieldValues.predicate) : this.fieldValues.predicate,
-      o: this._expandQNames ? this.expandQName(this.fieldValues.object) : this.fieldValues.object,
+      // WORDS ARE NEVER EXPANDED: a name is, and an object typed as words —
+      // a datatype or a language chosen, or a literal face — is kept as
+      // typed. `wp:Freedom` typed as words became the Wikipedia URL, as words
+      o: this._expandQNames && this._objectIsName()
+        ? this.expandQName(this.fieldValues.object) : this.fieldValues.object,
       g: this._expandQNames ? this.expandQName(this.fieldValues.graph) : this.fieldValues.graph,
       at: new Date().toISOString(),
       by: this._currentIdentity || 'anonymous'

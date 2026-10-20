@@ -299,6 +299,21 @@ test.describe('<quad-form> the empty prefix', () => {
     await gotoFormPage(page);
   });
 
+  test('a prefix table cannot bind `:` — a file\'s `@prefix : <http://example.org/>` among them — only defaultNamespace does', async ({ page }) => {
+    const seen = await page.evaluate(() => {
+      const qf = document.getElementById('qf');
+      qf.prefixes = { '': 'http://example.org/', wp: 'https://en.wikipedia.org/wiki/' };
+      const unbound = { valid: qf.validateField('object', ':Carol', 'qname'), expanded: qf.expandQName(':Carol') };
+      qf.defaultNamespace = 'mntl:open/x/people#';
+      return { unbound, bound: qf.expandQName(':Carol'), wp: qf.expandQName('wp:Freedom') };
+    });
+    expect(seen).toEqual({
+      unbound: { valid: false, expanded: ':Carol' },
+      bound: 'mntl:open/x/people#Carol',
+      wp: 'https://en.wikipedia.org/wiki/Freedom',
+    });
+  });
+
   test(':Name is valid and expands only where the host binds `:`; _: never is; nothing contracts to it', async ({ page }) => {
     const seen = await page.evaluate(() => {
       const qf = document.getElementById('qf');
@@ -324,5 +339,35 @@ test.describe('<quad-form> the empty prefix', () => {
       others: { curie: 'http://xmlns.com/foaf/0.1/name', iri: 'mntl:open/x/people#Carol' },
       contracted: 'mntl:open/x/people#Carol',
     });
+  });
+});
+
+// WORDS ARE NEVER EXPANDED (smurp 2026-10-20: `wp:Freedom` typed into a
+// ponder cell was saved as the Wikipedia URL, as words). A name is.
+test.describe('<quad-form> words are kept as typed', () => {
+  test.beforeEach(async ({ page }) => {
+    await gotoFormPage(page);
+    await page.evaluate(() => {
+      const qf = document.getElementById('qf');
+      window.submitted = [];
+      qf.addEventListener('quad-submitted', (e) => window.submitted.push(e.detail.o));
+      qf.toggleNanoMode();
+    });
+    await expect.poll(() => page.evaluate(() =>
+      document.getElementById('qf').shadowRoot.activeElement?.id ?? null)).toBe('object-input');
+  });
+
+  test('a name is expanded; the same characters as words are not', async ({ page }) => {
+    const input = inForm(page, '#object-input');
+    await input.fill('wp:Freedom');
+    await input.press('Tab');
+    await expect.poll(() => page.evaluate(() => window.submitted)).toEqual(['https://en.wikipedia.org/wiki/Freedom']);
+    // the host says the object is words (a held literal's datatype)
+    await page.evaluate(() => { document.getElementById('qf').objectDatatype = 'xsd:string'; });
+    await input.focus();
+    await input.fill('wp:Freedom');
+    await input.press('Tab');
+    await expect.poll(() => page.evaluate(() => window.submitted))
+      .toEqual(['https://en.wikipedia.org/wiki/Freedom', 'wp:Freedom']);
   });
 });
