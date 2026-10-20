@@ -539,6 +539,18 @@ class QuadFormWC extends HTMLElement {
   set prefixes(value) { 
     this._prefixes = { ...COMMON_PREFIXES, ...value };
   }
+
+  /**
+   * THE EMPTY PREFIX, `:` — what `:Carol` expands to (Turtle's
+   * `@prefix : <…>`). A host binds it to its own namespace (nooviz: the
+   * panel's mental space and a `#`, so `:Carol` in a ponder of
+   * mntl:open/x/people is mntl:open/x/people#Carol). It is read, never
+   * written: an IRI is not contracted to `:Carol` by it. Unset, `:Carol`
+   * is invalid, as it always was. `_:` is never a prefix: a blank node
+   * label names nothing a later statement can reach.
+   */
+  get defaultNamespace() { return this._defaultNamespace ?? null; }
+  set defaultNamespace(value) { this._defaultNamespace = value || null; }
   
   get currentIdentity() { return this._currentIdentity; }
   set currentIdentity(value) { 
@@ -607,6 +619,11 @@ class QuadFormWC extends HTMLElement {
     
     if (type === 'uri' || type === 'qname') {
       const colonIndex = value.indexOf(':');
+
+      // `:Name`, the empty prefix, where the host has bound it
+      if (colonIndex === 0) {
+        return !!this._defaultNamespace && /^[a-zA-Z_][\w-]*$/.test(value.slice(1));
+      }
       
       // Must contain a colon to be a valid identifier
       if (colonIndex <= 0) {
@@ -2686,6 +2703,9 @@ class QuadFormWC extends HTMLElement {
     const colonIndex = value.indexOf(':');
     if (colonIndex === -1) {
       return value;
+    }
+    if (colonIndex === 0) {
+      return this._defaultNamespace ? this._defaultNamespace + value.slice(1) : value;
     }
     
     const prefix = value.substring(0, colonIndex);

@@ -289,3 +289,40 @@ test.describe('<quad-form> the object picker is for things', () => {
   });
 });
 
+
+// THE EMPTY PREFIX (2026-10-20, decided with smurp for the ponder's draft
+// row and detail()'s subject: `:Name` is the panel's mental space and a
+// `#`). A host binds it with defaultNamespace; unbound, `:Name` is invalid
+// as before; `_:` is never a prefix; and it expands, never contracts.
+test.describe('<quad-form> the empty prefix', () => {
+  test.beforeEach(async ({ page }) => {
+    await gotoFormPage(page);
+  });
+
+  test(':Name is valid and expands only where the host binds `:`; _: never is; nothing contracts to it', async ({ page }) => {
+    const seen = await page.evaluate(() => {
+      const qf = document.getElementById('qf');
+      const valid = (v) => qf.validateField('subject', v, 'qname');
+      const unbound = { valid: valid(':Carol'), expanded: qf.expandQName(':Carol') };
+      qf.defaultNamespace = 'mntl:open/x/people#';
+      return {
+        unbound,
+        bound: { valid: valid(':Carol'), expanded: qf.expandQName(':Carol') },
+        badLocal: valid(':2nd'),
+        bare: valid(':'),
+        blank: valid('_:carol'),
+        others: { curie: qf.expandQName('foaf:name'), iri: qf.expandQName('mntl:open/x/people#Carol') },
+        contracted: qf.contractUri('mntl:open/x/people#Carol'),
+      };
+    });
+    expect(seen).toEqual({
+      unbound: { valid: false, expanded: ':Carol' },
+      bound: { valid: true, expanded: 'mntl:open/x/people#Carol' },
+      badLocal: false,
+      bare: false,
+      blank: false,
+      others: { curie: 'http://xmlns.com/foaf/0.1/name', iri: 'mntl:open/x/people#Carol' },
+      contracted: 'mntl:open/x/people#Carol',
+    });
+  });
+});
